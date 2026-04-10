@@ -3,1134 +3,1166 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Rate Limiter — Live Dashboard</title>
+<title>Distributed Rate Limiter</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Syne:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --bg:#0a0a0a;--surface:#111;--surface2:#181818;--border:#242424;--border2:#2e2e2e;
-  --text:#e8e8e8;--muted:#666;--dim:#444;
-  --green:#22c55e;--green-bg:rgba(34,197,94,.08);--green-dim:rgba(34,197,94,.15);
-  --red:#ef4444;--red-bg:rgba(239,68,68,.08);--red-dim:rgba(239,68,68,.15);
-  --amber:#f59e0b;--amber-bg:rgba(245,158,11,.08);
-  --blue:#60a5fa;--blue-bg:rgba(96,165,250,.08);
-  --mono:'IBM Plex Mono',monospace;--sans:'IBM Plex Sans',sans-serif;
+  --bg:#050507;--s1:#0c0c10;--s2:#12121a;--s3:#1a1a26;
+  --border:#1e1e2e;--border2:#2a2a3e;
+  --text:#f0f0f8;--muted:#6b6b8a;--dim:#3a3a52;
+  --green:#00ff88;--green2:#00cc6a;--green-bg:rgba(0,255,136,.06);
+  --red:#ff4466;--red-bg:rgba(255,68,102,.06);
+  --amber:#ffb020;--amber-bg:rgba(255,176,32,.06);
+  --blue:#4488ff;--blue2:#2266dd;--blue-bg:rgba(68,136,255,.06);
+  --purple:#a855f7;--purple-bg:rgba(168,85,247,.06);
+  --cyan:#00d4ff;
+  --mono:'JetBrains Mono',monospace;
+  --display:'Syne',sans-serif;
 }
-html{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px;line-height:1.5}
-body{min-height:100vh}
-.shell{display:grid;grid-template-columns:220px 1fr;grid-template-rows:48px 1fr;min-height:100vh}
+html{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:13px;line-height:1.6;scroll-behavior:smooth}
+body{min-height:100vh;overflow-x:hidden}
 
-/* TOPBAR */
-.topbar{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;padding:0 20px;border-bottom:1px solid var(--border);background:var(--surface)}
-.topbar-left{display:flex;align-items:center;gap:12px}
-.logo-mark{width:24px;height:24px;border:1.5px solid var(--text);display:grid;grid-template-columns:1fr 1fr;gap:2px;padding:4px}
-.logo-mark span{background:var(--text);display:block}
-.logo-mark span:nth-child(3){background:transparent;border:1px solid var(--border2)}
-.logo-name{font-family:var(--mono);font-size:13px;font-weight:500;letter-spacing:.04em}
-.topbar-right{display:flex;align-items:center;gap:16px}
-.status-pill{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;color:var(--muted)}
-.status-dot{width:6px;height:6px;border-radius:50%;background:var(--dim);transition:background .3s}
-.status-dot.live{background:var(--green);box-shadow:0 0 6px var(--green)}
-.docs-link{font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;border:1px solid var(--border2);padding:4px 10px;transition:all .15s}
-.docs-link:hover{color:var(--text);border-color:var(--dim)}
+/* ── NOISE OVERLAY ── */
+body::before{content:'';position:fixed;inset:0;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");pointer-events:none;z-index:0;opacity:.4}
 
-/* SIDEBAR */
-.sidebar{border-right:1px solid var(--border);background:var(--surface);padding:20px 0;display:flex;flex-direction:column;gap:2px}
-.sidebar-section{padding:0 16px 8px;font-family:var(--mono);font-size:10px;color:var(--dim);letter-spacing:.08em;text-transform:uppercase;margin-top:8px}
-.nav-item{display:flex;align-items:center;gap:10px;padding:7px 16px;cursor:pointer;transition:all .12s;font-size:13px;color:var(--muted);border-left:2px solid transparent;user-select:none}
-.nav-item:hover{color:var(--text);background:var(--surface2)}
-.nav-item.active{color:var(--text);border-left-color:var(--text);background:var(--surface2)}
-.nav-icon{font-family:var(--mono);font-size:11px;width:16px;text-align:center;color:var(--dim)}
-.nav-item.active .nav-icon{color:var(--text)}
+/* ── LAYOUT ── */
+.shell{display:grid;grid-template-columns:260px 1fr;grid-template-rows:56px 1fr;min-height:100vh;position:relative;z-index:1}
 
-/* MAIN */
+/* ── TOPBAR ── */
+.topbar{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;padding:0 24px;border-bottom:1px solid var(--border);background:rgba(5,5,7,.9);backdrop-filter:blur(12px);position:sticky;top:0;z-index:100}
+.logo{display:flex;align-items:center;gap:12px}
+.logo-icon{position:relative;width:28px;height:28px}
+.logo-icon svg{width:28px;height:28px}
+.logo-text{font-family:var(--display);font-size:15px;font-weight:700;letter-spacing:-.01em;color:var(--text)}
+.logo-text span{color:var(--green)}
+.topbar-center{display:flex;align-items:center;gap:4px}
+.tab-btn{font-family:var(--mono);font-size:11px;padding:5px 14px;background:transparent;border:1px solid transparent;color:var(--muted);cursor:pointer;transition:all .15s;letter-spacing:.04em}
+.tab-btn:hover{color:var(--text);border-color:var(--border2)}
+.tab-btn.active{color:var(--green);border-color:rgba(0,255,136,.3);background:rgba(0,255,136,.04)}
+.topbar-right{display:flex;align-items:center;gap:14px}
+.pulse-dot{width:7px;height:7px;border-radius:50%;background:var(--dim);transition:all .3s;flex-shrink:0}
+.pulse-dot.live{background:var(--green);box-shadow:0 0 0 3px rgba(0,255,136,.15);animation:livepulse 2s ease infinite}
+@keyframes livepulse{0%,100%{box-shadow:0 0 0 3px rgba(0,255,136,.15)}50%{box-shadow:0 0 0 6px rgba(0,255,136,.05)}}
+.conn-label{font-size:11px;color:var(--muted)}
+.api-link{font-size:11px;color:var(--muted);text-decoration:none;border:1px solid var(--border2);padding:4px 10px;transition:all .15s}
+.api-link:hover{color:var(--text);border-color:var(--blue)}
+
+/* ── SIDEBAR ── */
+.sidebar{border-right:1px solid var(--border);background:var(--s1);display:flex;flex-direction:column;overflow-y:auto}
+.sidebar-logo-area{padding:24px 20px 16px;border-bottom:1px solid var(--border)}
+.sidebar-tagline{font-size:10px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;line-height:1.6;margin-top:6px}
+.nav-section{padding:16px 20px 6px;font-size:9px;color:var(--dim);letter-spacing:.1em;text-transform:uppercase}
+.nav-item{display:flex;align-items:center;gap:10px;padding:8px 20px;cursor:pointer;transition:all .12s;color:var(--muted);border-left:2px solid transparent;position:relative}
+.nav-item:hover{color:var(--text);background:rgba(255,255,255,.02)}
+.nav-item.active{color:var(--text);border-left-color:var(--green);background:rgba(0,255,136,.03)}
+.nav-dot{width:5px;height:5px;border-radius:50%;background:var(--dim);flex-shrink:0;transition:all .15s}
+.nav-item.active .nav-dot{background:var(--green);box-shadow:0 0 4px var(--green)}
+.nav-label{font-size:12px;letter-spacing:.02em}
+.nav-badge{margin-left:auto;font-size:9px;padding:1px 6px;border-radius:3px;background:rgba(0,255,136,.1);color:var(--green);letter-spacing:.04em}
+.sidebar-footer{margin-top:auto;padding:16px 20px;border-top:1px solid var(--border);font-size:10px;color:var(--dim)}
+.sidebar-footer a{color:var(--muted);text-decoration:none}
+.sidebar-footer a:hover{color:var(--text)}
+
+/* ── MAIN ── */
 .main{overflow-y:auto;background:var(--bg)}
-.page{display:none;padding:28px 32px;max-width:960px}
+.page{display:none;animation:fadein .2s ease}
 .page.active{display:block}
-.page-title{font-family:var(--mono);font-size:18px;font-weight:500;margin-bottom:4px}
-.page-sub{color:var(--muted);font-size:13px;margin-bottom:28px}
+@keyframes fadein{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
 
-/* STAT CARDS */
-.stat-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:20px}
-.stat-card{background:var(--surface);border:1px solid var(--border);padding:16px;position:relative;overflow:hidden}
-.stat-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px}
-.stat-card.green::before{background:var(--green)}
-.stat-card.red::before{background:var(--red)}
-.stat-card.amber::before{background:var(--amber)}
-.stat-card.blue::before{background:var(--blue)}
-.stat-label{font-family:var(--mono);font-size:10px;color:var(--dim);letter-spacing:.06em;text-transform:uppercase;margin-bottom:8px}
-.stat-val{font-family:var(--mono);font-size:26px;font-weight:500;line-height:1;transition:color .3s}
-.stat-val.green{color:var(--green)}.stat-val.red{color:var(--red)}.stat-val.amber{color:var(--amber)}.stat-val.blue{color:var(--blue)}
+/* ── HERO SECTION ── */
+.hero{padding:48px 40px 32px;border-bottom:1px solid var(--border);position:relative;overflow:hidden}
+.hero::before{content:'';position:absolute;top:-60px;right:-60px;width:300px;height:300px;background:radial-gradient(circle,rgba(0,255,136,.06) 0%,transparent 70%);pointer-events:none}
+.hero::after{content:'';position:absolute;bottom:-40px;left:20%;width:200px;height:200px;background:radial-gradient(circle,rgba(68,136,255,.04) 0%,transparent 70%);pointer-events:none}
+.hero-eyebrow{font-size:10px;color:var(--green);letter-spacing:.12em;text-transform:uppercase;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.hero-eyebrow::before{content:'';width:20px;height:1px;background:var(--green)}
+.hero-title{font-family:var(--display);font-size:36px;font-weight:800;line-height:1.1;letter-spacing:-.02em;margin-bottom:10px;color:var(--text)}
+.hero-title .accent{color:var(--green)}
+.hero-sub{font-size:13px;color:var(--muted);max-width:520px;line-height:1.7;margin-bottom:28px}
+.hero-pills{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:32px}
+.pill{font-size:10px;padding:4px 10px;border:1px solid var(--border2);color:var(--muted);letter-spacing:.04em;display:flex;align-items:center;gap:5px}
+.pill.green{border-color:rgba(0,255,136,.25);color:var(--green);background:rgba(0,255,136,.04)}
+.pill.blue{border-color:rgba(68,136,255,.25);color:var(--blue);background:rgba(68,136,255,.04)}
+.pill.amber{border-color:rgba(255,176,32,.25);color:var(--amber);background:rgba(255,176,32,.04)}
+.pill.purple{border-color:rgba(168,85,247,.25);color:var(--purple);background:rgba(168,85,247,.04)}
 
-/* PANEL */
-.panel{background:var(--surface);border:1px solid var(--border);margin-bottom:16px}
-.panel-header{padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
-.panel-title{font-family:var(--mono);font-size:12px;font-weight:500;letter-spacing:.04em}
-.panel-body{padding:16px}
+/* ── ARCH DIAGRAM ── */
+.arch{display:flex;align-items:center;gap:0;font-size:10px;overflow-x:auto;padding-bottom:4px}
+.arch-node{display:flex;flex-direction:column;align-items:center;gap:5px;flex-shrink:0}
+.arch-box{padding:7px 12px;border:1px solid var(--border2);background:var(--s2);font-size:10px;color:var(--muted);text-align:center;white-space:nowrap;transition:all .2s;min-width:80px}
+.arch-box.highlight{border-color:rgba(0,255,136,.4);color:var(--green);background:rgba(0,255,136,.04)}
+.arch-box.blue{border-color:rgba(68,136,255,.35);color:var(--blue);background:rgba(68,136,255,.04)}
+.arch-box.amber{border-color:rgba(255,176,32,.35);color:var(--amber);background:rgba(255,176,32,.04)}
+.arch-sub{font-size:9px;color:var(--dim);text-align:center}
+.arch-arrow{display:flex;flex-direction:column;align-items:center;padding:0 6px;flex-shrink:0}
+.arch-line{width:32px;height:1px;background:var(--border2);position:relative}
+.arch-line::after{content:'▶';position:absolute;right:-5px;top:-5px;font-size:8px;color:var(--border2)}
+.arch-line.animated::after{color:var(--green);animation:arrowpulse 1.5s ease infinite}
+.arch-line.animated{background:linear-gradient(90deg,var(--border2),rgba(0,255,136,.4))}
+@keyframes arrowpulse{0%,100%{opacity:.4}50%{opacity:1}}
+.arch-arrow-label{font-size:8px;color:var(--dim);margin-top:2px}
 
-/* FORM */
-.form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
-.form-row.three{grid-template-columns:1fr 1fr 1fr}
-.form-group{display:flex;flex-direction:column;gap:5px}
-.form-label{font-family:var(--mono);font-size:10px;color:var(--dim);letter-spacing:.06em;text-transform:uppercase}
-.form-input,.form-select{background:var(--bg);border:1px solid var(--border2);color:var(--text);padding:8px 10px;font-family:var(--mono);font-size:13px;outline:none;transition:border-color .15s;width:100%;-webkit-appearance:none}
-.form-input:focus,.form-select:focus{border-color:var(--dim)}
-.form-select{cursor:pointer;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23666'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;padding-right:28px}
+/* ── CONTENT AREA ── */
+.content{padding:28px 40px;max-width:1000px}
 
-/* BUTTONS */
-.btn{font-family:var(--mono);font-size:12px;font-weight:500;padding:9px 18px;border:1px solid;cursor:pointer;transition:all .12s;letter-spacing:.04em;display:inline-flex;align-items:center;gap:7px;text-decoration:none}
-.btn-primary{background:var(--text);color:var(--bg);border-color:var(--text)}
-.btn-primary:hover{background:#ccc;border-color:#ccc}
+/* ── METRICS ROW ── */
+.metrics-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:24px}
+.metric{background:var(--s1);border:1px solid var(--border);padding:18px 16px;position:relative;overflow:hidden;cursor:default;transition:border-color .2s}
+.metric:hover{border-color:var(--border2)}
+.metric::after{content:'';position:absolute;bottom:0;left:0;right:0;height:1px;transition:opacity .3s;opacity:0}
+.metric.green::after{background:linear-gradient(90deg,transparent,var(--green),transparent);opacity:1}
+.metric.red::after{background:linear-gradient(90deg,transparent,var(--red),transparent);opacity:1}
+.metric.amber::after{background:linear-gradient(90deg,transparent,var(--amber),transparent);opacity:1}
+.metric.blue::after{background:linear-gradient(90deg,transparent,var(--blue),transparent);opacity:1}
+.metric-label{font-size:9px;color:var(--dim);letter-spacing:.1em;text-transform:uppercase;margin-bottom:10px}
+.metric-val{font-family:var(--display);font-size:32px;font-weight:700;line-height:1;transition:all .2s}
+.metric-val.green{color:var(--green)}.metric-val.red{color:var(--red)}.metric-val.amber{color:var(--amber)}.metric-val.blue{color:var(--blue)}
+.metric-delta{font-size:9px;color:var(--dim);margin-top:6px}
+
+/* ── LIVE TRAFFIC CANVAS ── */
+.traffic-section{background:var(--s1);border:1px solid var(--border);margin-bottom:20px}
+.section-header{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.section-title{font-size:11px;font-weight:500;letter-spacing:.04em;color:var(--text)}
+.section-meta{font-size:10px;color:var(--muted)}
+.traffic-canvas{display:block;width:100%;background:var(--bg)}
+.traffic-legend{display:flex;gap:16px;padding:10px 18px;border-top:1px solid var(--border)}
+.legend-item{display:flex;align-items:center;gap:6px;font-size:10px;color:var(--muted)}
+.legend-dot{width:8px;height:8px;border-radius:50%}
+
+/* ── FIRE PANEL ── */
+.fire-panel{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}
+.fire-card{background:var(--s1);border:1px solid var(--border);padding:20px}
+.fire-card-title{font-size:10px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin-bottom:14px}
+.fire-controls{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+.input-group{display:flex;flex-direction:column;gap:4px}
+.input-label{font-size:9px;color:var(--dim);letter-spacing:.06em;text-transform:uppercase}
+.inp{background:var(--bg);border:1px solid var(--border2);color:var(--text);padding:7px 9px;font-family:var(--mono);font-size:12px;outline:none;transition:border-color .15s;width:100%}
+.inp:focus{border-color:var(--green)}
+.btn{font-family:var(--mono);font-size:11px;font-weight:500;padding:8px 16px;border:1px solid;cursor:pointer;transition:all .12s;letter-spacing:.04em;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.btn-primary{background:var(--green);color:#000;border-color:var(--green)}
+.btn-primary:hover{background:var(--green2);border-color:var(--green2)}
 .btn-ghost{background:transparent;color:var(--muted);border-color:var(--border2)}
-.btn-ghost:hover{color:var(--text);border-color:var(--dim)}
-.btn-danger{background:transparent;color:var(--red);border-color:var(--red)}
-.btn-danger:hover{background:var(--red-bg)}
-.btn-green{background:transparent;color:var(--green);border-color:var(--green)}
-.btn-green:hover{background:var(--green-bg)}
-.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn-ghost:hover{color:var(--text);border-color:var(--border2)}
+.btn-red{background:transparent;color:var(--red);border-color:rgba(255,68,102,.4)}
+.btn-red:hover{background:var(--red-bg)}
+.btn:disabled{opacity:.35;cursor:not-allowed}
 
-/* RESULT BAR */
-.result-bar{padding:12px 14px;border:1px solid var(--border);font-family:var(--mono);font-size:12px;display:flex;align-items:center;gap:10px;min-height:44px;transition:all .2s}
-.result-bar.allowed{border-color:var(--green);background:var(--green-bg);color:var(--green)}
-.result-bar.blocked{border-color:var(--red);background:var(--red-bg);color:var(--red)}
-.result-bar.idle{color:var(--dim)}
-.result-tag{font-size:10px;padding:2px 7px;border:1px solid currentColor;letter-spacing:.05em}
-
-/* ── PRESSURE GAUGE ── */
-.gauge-wrap{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px 0 4px}
-.gauge-svg{overflow:visible}
-.gauge-bg{fill:none;stroke:var(--border2);stroke-width:10;stroke-linecap:round}
-.gauge-fill{fill:none;stroke-width:10;stroke-linecap:round;transition:stroke-dashoffset .4s ease,stroke .4s ease;transform-origin:center;transform:rotate(135deg)}
-.gauge-num{font-family:var(--mono);font-size:22px;font-weight:500;text-anchor:middle;dominant-baseline:central;transition:fill .4s}
-.gauge-label{font-family:var(--mono);font-size:9px;text-anchor:middle;fill:var(--dim);letter-spacing:.06em}
-.gauge-pct{font-family:var(--mono);font-size:11px;text-anchor:middle;fill:var(--muted)}
-@keyframes gaugePulse{0%,100%{opacity:1}50%{opacity:.5}}
-.gauge-fill.danger{animation:gaugePulse .7s ease-in-out infinite}
-
-/* ── SPARKLINE ── */
-.spark-wrap{position:relative}
-.spark-canvas{display:block;width:100%;height:56px}
-.spark-labels{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:4px}
-
-/* ── AUTO-FIRE PANEL ── */
-.fire-controls{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
-.toggle-wrap{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:12px;color:var(--muted)}
-.toggle{position:relative;width:36px;height:20px;cursor:pointer}
-.toggle input{opacity:0;width:0;height:0;position:absolute}
-.toggle-track{position:absolute;inset:0;background:var(--border2);border-radius:10px;transition:background .2s}
-.toggle input:checked+.toggle-track{background:var(--green)}
-.toggle-thumb{position:absolute;top:3px;left:3px;width:14px;height:14px;background:var(--text);border-radius:50%;transition:transform .2s;pointer-events:none}
-.toggle input:checked~.toggle-thumb{transform:translateX(16px)}
-.fire-rate-label{font-family:var(--mono);font-size:11px;color:var(--dim)}
+/* ── RESULT BAR ── */
+.result{padding:10px 14px;border:1px solid var(--border);font-size:11px;display:flex;align-items:center;gap:10px;min-height:40px;transition:all .25s;margin-top:12px}
+.result.ok{border-color:rgba(0,255,136,.35);background:rgba(0,255,136,.04);color:var(--green)}
+.result.blocked{border-color:rgba(255,68,102,.35);background:rgba(255,68,102,.04);color:var(--red)}
+.result.idle{color:var(--dim)}
+.result-tag{font-size:9px;padding:2px 7px;border:1px solid currentColor;letter-spacing:.06em}
 
 /* ── COUNTDOWN ── */
-.countdown-wrap{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:80px;font-family:var(--mono)}
-.countdown-num{font-size:48px;font-weight:500;color:var(--red);line-height:1;transition:color .3s}
-.countdown-num.ready{color:var(--green)}
-.countdown-sub{font-size:11px;color:var(--dim);margin-top:4px;letter-spacing:.06em}
-.countdown-bar{width:100%;height:3px;background:var(--border);margin-top:10px;overflow:hidden}
-.countdown-fill{height:100%;background:var(--red);width:100%;transition:width 1s linear,background .3s}
-.countdown-fill.ready{background:var(--green)}
+.countdown-inner{text-align:center;padding:10px 0}
+.cd-num{font-family:var(--display);font-size:52px;font-weight:800;line-height:1;transition:color .3s;color:var(--red)}
+.cd-num.ready{color:var(--green)}
+.cd-label{font-size:9px;color:var(--dim);letter-spacing:.1em;text-transform:uppercase;margin-top:4px}
+.cd-bar{height:2px;background:var(--border);margin-top:12px;overflow:hidden}
+.cd-fill{height:100%;background:var(--red);transition:width 1s linear,background .3s}
+.cd-fill.ready{background:var(--green)}
 
-/* ── TOKEN BUCKET VIZ ── */
-.bucket-wrap{display:flex;gap:20px;align-items:flex-start}
-.bucket-visual{flex-shrink:0}
-.bucket-svg{overflow:visible}
-.token-circle{transition:all .3s;cursor:default}
-.bucket-info{flex:1;display:flex;flex-direction:column;gap:10px}
-.bucket-stat{font-family:var(--mono);font-size:12px}
-.bucket-stat-label{color:var(--dim);font-size:10px;letter-spacing:.06em;text-transform:uppercase;margin-bottom:2px}
-.bucket-stat-val{color:var(--text);font-size:20px;font-weight:500}
-.token-refill-bar{height:3px;background:var(--border);overflow:hidden;margin-top:6px}
-.token-refill-fill{height:100%;background:var(--blue);width:0%;transition:width .1s linear}
+/* ── TOGGLE ── */
+.toggle-row{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.toggle{position:relative;width:38px;height:21px;cursor:pointer;flex-shrink:0}
+.toggle input{opacity:0;width:0;height:0;position:absolute}
+.t-track{position:absolute;inset:0;background:var(--border2);border-radius:11px;transition:background .2s}
+.toggle input:checked+.t-track{background:var(--green)}
+.t-thumb{position:absolute;top:3px;left:3px;width:15px;height:15px;background:var(--bg);border-radius:50%;transition:transform .2s;pointer-events:none}
+.toggle input:checked~.t-thumb{transform:translateX(17px);background:var(--text)}
+.toggle-label{font-size:11px;color:var(--muted)}
+
+/* ── GAUGE ── */
+.gauge-section{background:var(--s1);border:1px solid var(--border);padding:20px;display:flex;flex-direction:column;align-items:center}
+.gauge-title{font-size:10px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin-bottom:12px;align-self:flex-start}
+.gauge-svg{overflow:visible;display:block;margin:0 auto}
+
+/* ── ALGO CARDS ── */
+.algo-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:24px}
+.algo-card{background:var(--s1);border:1px solid var(--border);padding:18px;cursor:pointer;transition:all .15s;position:relative;overflow:hidden}
+.algo-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:var(--border);transition:background .2s}
+.algo-card:hover{border-color:var(--border2)}
+.algo-card:hover::before{background:var(--muted)}
+.algo-card.sel{border-color:rgba(0,255,136,.3)}
+.algo-card.sel::before{background:var(--green)}
+.algo-card-check{position:absolute;top:10px;right:12px;font-size:10px;color:var(--green);opacity:0;transition:opacity .15s}
+.algo-card.sel .algo-card-check{opacity:1}
+.algo-name{font-size:13px;font-weight:500;margin-bottom:5px;color:var(--text)}
+.algo-desc{font-size:11px;color:var(--muted);line-height:1.6;margin-bottom:10px}
+.algo-badge{display:inline-flex;align-items:center;gap:4px;font-size:9px;padding:2px 7px;border:1px solid var(--border2);color:var(--dim)}
 
 /* ── SIMULATE ── */
-.sim-track{height:6px;background:var(--surface2);margin-bottom:10px;overflow:hidden}
-.sim-fill-a{height:100%;background:var(--green);float:left;transition:width .3s}
-.sim-fill-b{height:100%;background:var(--red);float:left;transition:width .3s}
-.sim-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(28px,1fr));gap:3px;max-height:160px;overflow-y:auto}
-.sim-cell{height:28px;font-family:var(--mono);font-size:9px;display:flex;align-items:center;justify-content:center;border:1px solid var(--border);color:var(--dim);transition:all .1s}
-.sim-cell.ok{background:var(--green-bg);border-color:rgba(34,197,94,.3);color:var(--green)}
-.sim-cell.fail{background:var(--red-bg);border-color:rgba(239,68,68,.3);color:var(--red)}
-.sim-summary{display:flex;gap:16px;margin-top:10px;font-family:var(--mono);font-size:12px}
-.sim-allowed{color:var(--green)}.sim-blocked{color:var(--red)}
+.sim-track{height:4px;background:var(--border);margin-bottom:12px;display:flex}
+.sim-a{height:100%;background:var(--green);transition:width .4s ease}
+.sim-b{height:100%;background:var(--red);transition:width .4s ease}
+.sim-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(30px,1fr));gap:3px}
+.sim-cell{height:30px;font-size:9px;display:flex;align-items:center;justify-content:center;border:1px solid var(--border);color:var(--dim);transition:all .08s}
+.sim-cell.ok{background:rgba(0,255,136,.08);border-color:rgba(0,255,136,.25);color:var(--green)}
+.sim-cell.fail{background:rgba(255,68,102,.08);border-color:rgba(255,68,102,.25);color:var(--red)}
+
+/* ── TOKEN BUCKET ── */
+.bucket-scene{display:grid;grid-template-columns:160px 1fr;gap:24px;align-items:start}
 
 /* ── LOG ── */
-.log-list{display:flex;flex-direction:column;gap:2px;max-height:340px;overflow-y:auto}
-.log-entry{display:grid;grid-template-columns:80px 60px 100px 1fr auto;gap:10px;padding:7px 10px;font-family:var(--mono);font-size:11px;border-left:2px solid transparent;align-items:center;transition:background .1s}
-.log-entry:hover{background:var(--surface2)}
-.log-entry.ok{border-left-color:var(--green)}.log-entry.fail{border-left-color:var(--red)}
-.log-ts{color:var(--dim)}.log-algo{color:var(--blue)}.log-id{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.log-rem{color:var(--muted);text-align:right}
-.log-badge{font-size:10px;padding:1px 6px;border:1px solid;letter-spacing:.04em}
-.log-badge.ok{color:var(--green);border-color:rgba(34,197,94,.4)}.log-badge.fail{color:var(--red);border-color:rgba(239,68,68,.4)}
-.log-empty{color:var(--dim);font-family:var(--mono);font-size:12px;padding:20px 10px}
+.log-wrap{background:var(--s1);border:1px solid var(--border)}
+.log-header{padding:12px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.log-cols{display:grid;grid-template-columns:76px 58px 110px 1fr 40px;gap:8px;padding:7px 18px;border-bottom:1px solid var(--border)}
+.log-col{font-size:9px;color:var(--dim);letter-spacing:.08em;text-transform:uppercase}
+.log-list{max-height:300px;overflow-y:auto}
+.log-row{display:grid;grid-template-columns:76px 58px 110px 1fr 40px;gap:8px;padding:7px 18px;font-size:11px;border-left:2px solid transparent;transition:background .1s;align-items:center}
+.log-row:hover{background:rgba(255,255,255,.015)}
+.log-row.ok{border-left-color:var(--green)}.log-row.fail{border-left-color:var(--red)}
+.log-ts{color:var(--dim)}.log-algo{color:var(--blue)}.log-client{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.log-rem{color:var(--dim);text-align:right}
+.log-badge{font-size:9px;padding:1px 6px;border:1px solid;letter-spacing:.04em}
+.log-badge.ok{color:var(--green);border-color:rgba(0,255,136,.3)}.log-badge.fail{color:var(--red);border-color:rgba(255,68,102,.3)}
+.log-empty{padding:24px 18px;color:var(--dim);font-size:11px}
 
-/* ALGO CARDS */
-.algo-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:20px}
-.algo-card{border:1px solid var(--border);padding:14px;cursor:pointer;transition:all .15s;position:relative}
-.algo-card:hover{border-color:var(--dim)}
-.algo-card.selected{border-color:var(--text)}
-.algo-card.selected::after{content:'✓';position:absolute;top:8px;right:10px;font-family:var(--mono);font-size:11px;color:var(--text)}
-.algo-name{font-family:var(--mono);font-size:12px;font-weight:500;margin-bottom:6px}
-.algo-desc{font-size:12px;color:var(--muted);line-height:1.5;margin-bottom:10px}
-.algo-tag{display:inline-block;font-family:var(--mono);font-size:10px;color:var(--dim);border:1px solid var(--border2);padding:2px 6px}
+/* ── CODE BLOCK ── */
+.code-block{background:var(--bg);border:1px solid var(--border);padding:16px;font-size:11px;line-height:1.8;margin:12px 0;overflow-x:auto}
+.c-kw{color:var(--green)}.c-fn{color:var(--blue)}.c-str{color:var(--amber)}.c-cm{color:var(--dim)}.c-num{color:var(--purple)}
 
-/* MISC */
-::-webkit-scrollbar{width:4px;height:4px}
+/* ── ADMIN ── */
+.admin-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+
+/* ── SCROLLBAR ── */
+::-webkit-scrollbar{width:3px;height:3px}
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:var(--border2)}
-.spin{display:inline-block;width:12px;height:12px;border:1.5px solid var(--border2);border-top-color:var(--text);border-radius:50%;animation:spin .6s linear infinite}
+
+/* ── SPINNER ── */
+.spin{display:inline-block;width:11px;height:11px;border:1.5px solid var(--border2);border-top-color:var(--green);border-radius:50%;animation:spin .5s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
-.toast-wrap{position:fixed;bottom:20px;right:20px;display:flex;flex-direction:column;gap:8px;z-index:99}
-.toast{background:var(--surface);border:1px solid var(--border2);padding:10px 14px;font-family:var(--mono);font-size:12px;min-width:220px;animation:slideIn .2s ease;display:flex;align-items:center;gap:8px}
-.toast.ok{border-left:3px solid var(--green)}.toast.fail{border-left:3px solid var(--red)}
-@keyframes slideIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+
+/* ── TOASTS ── */
+.toast-wrap{position:fixed;bottom:20px;right:20px;display:flex;flex-direction:column;gap:6px;z-index:999}
+.toast{background:var(--s2);border:1px solid var(--border2);padding:10px 14px;font-size:11px;min-width:200px;animation:tin .2s ease;display:flex;align-items:center;gap:8px}
+.toast.ok{border-left:2px solid var(--green)}.toast.fail{border-left:2px solid var(--red)}
+@keyframes tin{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+/* ── SECTION CARD ── */
+.card{background:var(--s1);border:1px solid var(--border);margin-bottom:16px}
+.card-header{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.card-body{padding:18px}
+.card-title{font-size:11px;font-weight:500;letter-spacing:.04em}
+
+.tag-row{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.tag{font-size:9px;padding:2px 7px;border:1px solid var(--border);color:var(--dim)}
 .divider{border:none;border-top:1px solid var(--border);margin:20px 0}
-.tag{font-family:var(--mono);font-size:10px;color:var(--dim);border:1px solid var(--border);padding:3px 8px}
-.tag-row{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:20px}
 .two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-.three-col{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:20px}
-@keyframes flash{0%{opacity:1}50%{opacity:.3}100%{opacity:1}}
-.flash{animation:flash .3s ease}
+.three-col{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
+.form-row.three{grid-template-columns:1fr 1fr 1fr}
+.form-group{display:flex;flex-direction:column;gap:4px}
+.form-label{font-size:9px;color:var(--dim);letter-spacing:.06em;text-transform:uppercase}
+.form-select{background:var(--bg);border:1px solid var(--border2);color:var(--text);padding:7px 9px;font-family:var(--mono);font-size:12px;outline:none;cursor:pointer;width:100%;-webkit-appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%236b6b8a'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 9px center;padding-right:26px}
+.form-select:focus{border-color:var(--green)}
 </style>
 </head>
 <body>
 <div class="shell">
 
-<!-- TOPBAR -->
+<!-- ══ TOPBAR ══ -->
 <header class="topbar">
-  <div class="topbar-left">
-    <div class="logo-mark"><span></span><span></span><span></span><span></span></div>
-    <span class="logo-name">rate-limiter</span>
+  <div class="logo">
+    <div class="logo-icon">
+      <svg viewBox="0 0 28 28" fill="none">
+        <rect x="1" y="1" width="11" height="11" stroke="var(--green)" stroke-width="1.2"/>
+        <rect x="16" y="1" width="11" height="11" stroke="var(--border2)" stroke-width="1.2"/>
+        <rect x="1" y="16" width="11" height="11" stroke="var(--border2)" stroke-width="1.2"/>
+        <rect x="16" y="16" width="11" height="11" stroke="var(--green)" stroke-width="1.2" opacity=".4"/>
+        <rect x="5" y="5" width="3" height="3" fill="var(--green)"/>
+        <rect x="20" y="20" width="3" height="3" fill="var(--green)" opacity=".4"/>
+      </svg>
+    </div>
+    <span class="logo-text">rate<span>limiter</span></span>
+  </div>
+  <div class="topbar-center">
+    <button class="tab-btn active" data-page="overview">overview</button>
+    <button class="tab-btn" data-page="test">test</button>
+    <button class="tab-btn" data-page="simulate">simulate</button>
+    <button class="tab-btn" data-page="bucket">token bucket</button>
+    <button class="tab-btn" data-page="algorithms">algorithms</button>
+    <button class="tab-btn" data-page="admin">admin</button>
   </div>
   <div class="topbar-right">
-    <div class="status-pill">
-      <div class="status-dot" id="status-dot"></div>
-      <span id="status-text">connecting</span>
-    </div>
-    <a href="/docs" class="docs-link" target="_blank">API docs ↗</a>
+    <div class="pulse-dot" id="status-dot"></div>
+    <span class="conn-label" id="conn-label">connecting</span>
+    <a href="/docs" class="api-link" target="_blank">API ↗</a>
   </div>
 </header>
 
-<!-- SIDEBAR -->
+<!-- ══ SIDEBAR ══ -->
 <nav class="sidebar">
-  <div class="sidebar-section">Monitor</div>
-  <div class="nav-item active" data-page="overview"><span class="nav-icon">◈</span> Overview</div>
-  <div class="nav-item" data-page="log"><span class="nav-icon">≡</span> Request log</div>
-  <div class="sidebar-section">Test</div>
-  <div class="nav-item" data-page="check"><span class="nav-icon">→</span> Check limit</div>
-  <div class="nav-item" data-page="simulate"><span class="nav-icon">⊞</span> Simulate burst</div>
-  <div class="nav-item" data-page="bucket"><span class="nav-icon">◎</span> Token bucket live</div>
-  <div class="sidebar-section">Inspect</div>
-  <div class="nav-item" data-page="algorithms"><span class="nav-icon">∿</span> Algorithms</div>
-  <div class="nav-item" data-page="admin"><span class="nav-icon">⊘</span> Admin</div>
+  <div class="sidebar-logo-area">
+    <div style="font-size:10px;color:var(--dim);letter-spacing:.06em;text-transform:uppercase">Distributed</div>
+    <div style="font-family:var(--display);font-size:18px;font-weight:800;color:var(--text);line-height:1.2;margin-top:2px">Rate<br>Limiter</div>
+    <div class="sidebar-tagline">Production-grade · Redis-backed<br>3 algorithms · Atomic Lua scripts</div>
+  </div>
+
+  <div class="nav-section">Monitor</div>
+  <div class="nav-item active" data-page="overview"><div class="nav-dot"></div><span class="nav-label">Overview</span><span class="nav-badge" id="nb-live">LIVE</span></div>
+  <div class="nav-item" data-page="test"><div class="nav-dot"></div><span class="nav-label">Check limit</span></div>
+
+  <div class="nav-section">Experiment</div>
+  <div class="nav-item" data-page="simulate"><div class="nav-dot"></div><span class="nav-label">Burst simulator</span></div>
+  <div class="nav-item" data-page="bucket"><div class="nav-dot"></div><span class="nav-label">Token bucket live</span></div>
+
+  <div class="nav-section">Reference</div>
+  <div class="nav-item" data-page="algorithms"><div class="nav-dot"></div><span class="nav-label">Algorithms</span></div>
+  <div class="nav-item" data-page="admin"><div class="nav-dot"></div><span class="nav-label">Admin</span></div>
+
+  <div class="sidebar-footer">
+    Built with FastAPI + Upstash<br>
+    <a href="/docs">Swagger UI</a> · <a href="https://github.com/saitejasrivilli/distributed-rate-limiter" target="_blank">GitHub ↗</a>
+  </div>
 </nav>
 
-<!-- MAIN -->
+<!-- ══ MAIN ══ -->
 <main class="main">
 
-<!-- ══ OVERVIEW ══════════════════════════════════════════ -->
-<section class="page active" id="page-overview">
-  <div class="page-title">Overview</div>
-  <div class="page-sub">Live metrics — requests firing against Upstash Redis</div>
-
-  <div class="stat-row">
-    <div class="stat-card green"><div class="stat-label">Requests allowed</div><div class="stat-val green" id="ov-allowed">0</div></div>
-    <div class="stat-card red"><div class="stat-label">Requests blocked</div><div class="stat-val red" id="ov-blocked">0</div></div>
-    <div class="stat-card amber"><div class="stat-label">Block rate</div><div class="stat-val amber" id="ov-rate">—</div></div>
-    <div class="stat-card blue"><div class="stat-label">Redis status</div><div class="stat-val blue" id="ov-redis">—</div></div>
+<!-- ════════ OVERVIEW ════════ -->
+<div class="page active" id="page-overview">
+  <div class="hero">
+    <div class="hero-eyebrow">distributed systems · redis · lua scripts</div>
+    <h1 class="hero-title">Rate limiting,<br><span class="accent">done right.</span></h1>
+    <p class="hero-sub">Production-grade rate limiter with atomic Redis operations, three algorithms, and zero race conditions. Fire requests below and watch the system respond in real time.</p>
+    <div class="hero-pills">
+      <span class="pill green">● Sliding window</span>
+      <span class="pill blue">● Fixed window</span>
+      <span class="pill amber">● Token bucket</span>
+      <span class="pill purple">● Atomic Lua scripts</span>
+      <span class="pill">HMAC-secured admin</span>
+      <span class="pill">Self-protected</span>
+      <span class="pill">TTL-based cleanup</span>
+    </div>
+    <!-- Architecture diagram -->
+    <div class="arch">
+      <div class="arch-node">
+        <div class="arch-box">Client</div>
+        <div class="arch-sub">HTTP request</div>
+      </div>
+      <div class="arch-arrow"><div class="arch-line animated" id="arch-l1"></div><div class="arch-arrow-label">req</div></div>
+      <div class="arch-node">
+        <div class="arch-box highlight">FastAPI</div>
+        <div class="arch-sub">Render · Python</div>
+      </div>
+      <div class="arch-arrow"><div class="arch-line" id="arch-l2"></div><div class="arch-arrow-label">Lua</div></div>
+      <div class="arch-node">
+        <div class="arch-box blue">Upstash Redis</div>
+        <div class="arch-sub">ZSET / STR / HASH</div>
+      </div>
+      <div class="arch-arrow"><div class="arch-line" id="arch-l3"></div><div class="arch-arrow-label">result</div></div>
+      <div class="arch-node">
+        <div class="arch-box amber" id="arch-response">200 / 429</div>
+        <div class="arch-sub">+ Retry-After header</div>
+      </div>
+    </div>
   </div>
 
-  <!-- PRESSURE GAUGE + SPARKLINE row -->
-  <div class="two-col" style="margin-bottom:16px">
-    <div class="panel">
-      <div class="panel-header"><span class="panel-title">Limit pressure</span></div>
-      <div class="panel-body gauge-wrap">
-        <svg class="gauge-svg" width="160" height="100" viewBox="0 0 160 100">
-          <path class="gauge-bg" d="M20,90 A70,70 0 1,1 140,90" />
-          <path class="gauge-fill" id="gauge-arc" d="M20,90 A70,70 0 1,1 140,90"
-            stroke="var(--green)"
-            stroke-dasharray="220"
-            stroke-dashoffset="220" />
-          <text class="gauge-num" id="gauge-num" x="80" y="72" fill="var(--green)">0%</text>
-          <text class="gauge-pct" x="80" y="90" fill="var(--muted)">of limit used</text>
-          <text class="gauge-label" x="20" y="100">0</text>
-          <text class="gauge-label" x="140" y="100" style="text-anchor:end" id="gauge-max-label">10</text>
+  <div class="content">
+    <!-- Metrics -->
+    <div class="metrics-row">
+      <div class="metric green"><div class="metric-label">Allowed</div><div class="metric-val green" id="m-allowed">0</div><div class="metric-delta" id="m-allowed-d">session total</div></div>
+      <div class="metric red"><div class="metric-label">Blocked</div><div class="metric-val red" id="m-blocked">0</div><div class="metric-delta" id="m-blocked-d">429 responses</div></div>
+      <div class="metric amber"><div class="metric-label">Block rate</div><div class="metric-val amber" id="m-rate">—</div><div class="metric-delta">% of all requests</div></div>
+      <div class="metric blue"><div class="metric-label">Redis</div><div class="metric-val blue" id="m-redis">—</div><div class="metric-delta">Upstash connection</div></div>
+    </div>
+
+    <!-- Traffic canvas + gauge -->
+    <div class="two-col" style="margin-bottom:20px">
+      <div class="traffic-section" style="flex:1">
+        <div class="section-header">
+          <span class="section-title">Live traffic · req/s</span>
+          <span class="section-meta" id="spark-rps">0 req/s</span>
+        </div>
+        <canvas id="spark" style="display:block;width:100%;height:72px"></canvas>
+        <div class="traffic-legend">
+          <div class="legend-item"><div class="legend-dot" style="background:var(--green)"></div>allowed</div>
+          <div class="legend-item"><div class="legend-dot" style="background:var(--red)"></div>blocked</div>
+        </div>
+      </div>
+
+      <!-- Gauge -->
+      <div style="background:var(--s1);border:1px solid var(--border);padding:20px;display:flex;flex-direction:column;align-items:center">
+        <div style="font-size:9px;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;align-self:flex-start;margin-bottom:8px">Limit pressure</div>
+        <svg id="gauge-svg" class="gauge-svg" width="160" height="110" viewBox="0 0 160 110">
+          <path d="M18,95 A62,62 0 1,1 142,95" fill="none" stroke="var(--border2)" stroke-width="10" stroke-linecap="round"/>
+          <path id="gauge-arc" d="M18,95 A62,62 0 1,1 142,95" fill="none" stroke="var(--green)" stroke-width="10" stroke-linecap="round" stroke-dasharray="196" stroke-dashoffset="196" style="transform-origin:80px 95px;transform:rotate(0deg);transition:stroke-dashoffset .5s ease,stroke .4s ease"/>
+          <text id="g-pct" x="80" y="78" text-anchor="middle" dominant-baseline="central" font-family="var(--display)" font-size="24" font-weight="800" fill="var(--green)" style="transition:fill .4s">0%</text>
+          <text x="80" y="96" text-anchor="middle" font-family="var(--mono)" font-size="9" fill="var(--muted)">of limit used</text>
+          <text x="18" y="108" text-anchor="middle" font-family="var(--mono)" font-size="8" fill="var(--dim)">0</text>
+          <text id="g-max" x="142" y="108" text-anchor="middle" font-family="var(--mono)" font-size="8" fill="var(--dim)">10</text>
         </svg>
-        <div style="font-family:var(--mono);font-size:11px;color:var(--dim);text-align:center;margin-top:4px">
-          <span id="gauge-used">0</span> / <span id="gauge-limit">10</span> requests
+        <div style="font-size:10px;color:var(--dim);text-align:center;margin-top:2px"><span id="g-used">0</span> / <span id="g-lim">10</span></div>
+      </div>
+    </div>
+
+    <!-- Autofire + countdown -->
+    <div class="two-col" style="margin-bottom:20px">
+      <div class="card" style="margin:0">
+        <div class="card-header">
+          <span class="card-title">Auto-fire mode</span>
+          <label class="toggle"><input type="checkbox" id="af-toggle"><div class="t-track"></div><div class="t-thumb"></div></label>
+        </div>
+        <div class="card-body">
+          <div class="three-col" style="margin-bottom:10px">
+            <div class="input-group"><label class="input-label">Client ID</label><input class="inp" id="af-client" value="demo"></div>
+            <div class="input-group"><label class="input-label">Limit</label><input class="inp" id="af-limit" type="number" value="10" min="1" max="1000"></div>
+            <div class="input-group"><label class="input-label">Rate (req/s)</label><input class="inp" id="af-rps" type="number" value="2" min="1" max="10"></div>
+          </div>
+          <div class="result idle" id="af-result"><span>Flip the toggle to start firing requests</span></div>
         </div>
       </div>
-    </div>
 
-    <div class="panel">
-      <div class="panel-header"><span class="panel-title">Request velocity (req/s)</span></div>
-      <div class="panel-body" style="padding-bottom:8px">
-        <canvas class="spark-canvas" id="spark-canvas"></canvas>
-        <div class="spark-labels"><span>30s ago</span><span>now</span></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- AUTO-FIRE + COUNTDOWN row -->
-  <div class="two-col" style="margin-bottom:16px">
-    <div class="panel">
-      <div class="panel-header">
-        <span class="panel-title">Auto-fire mode</span>
-        <label class="toggle">
-          <input type="checkbox" id="autofire-toggle">
-          <div class="toggle-track"></div>
-          <div class="toggle-thumb"></div>
-        </label>
-      </div>
-      <div class="panel-body">
-        <div class="fire-controls">
-          <div class="form-group" style="flex:1">
-            <label class="form-label">Client ID</label>
-            <input class="form-input" id="af-client" value="demo">
-          </div>
-          <div class="form-group" style="width:80px">
-            <label class="form-label">Limit</label>
-            <input class="form-input" id="af-limit" type="number" value="10" min="1" max="1000">
-          </div>
-          <div class="form-group" style="width:80px">
-            <label class="form-label">Rate (req/s)</label>
-            <input class="form-input" id="af-rate" type="number" value="2" min="1" max="10" step="1">
-          </div>
-        </div>
-        <div class="result-bar idle" id="af-result"><span>Enable auto-fire to start</span></div>
-      </div>
-    </div>
-
-    <div class="panel">
-      <div class="panel-header"><span class="panel-title">Retry countdown</span></div>
-      <div class="panel-body">
-        <div class="countdown-wrap">
-          <div class="countdown-num" id="cd-num">—</div>
-          <div class="countdown-sub" id="cd-sub">NO ACTIVE BLOCK</div>
-          <div class="countdown-bar"><div class="countdown-fill" id="cd-fill" style="width:0%"></div></div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- RECENT LOG -->
-  <div class="panel">
-    <div class="panel-header"><span class="panel-title">Recent activity</span></div>
-    <div class="panel-body" style="padding:0">
-      <div class="log-list" id="ov-log"><div class="log-empty">Enable auto-fire or fire a request above</div></div>
-    </div>
-  </div>
-</section>
-
-<!-- ══ LOG ══════════════════════════════════════════════ -->
-<section class="page" id="page-log">
-  <div class="page-title">Request log</div>
-  <div class="page-sub">All requests made in this session</div>
-  <div class="panel">
-    <div class="panel-header">
-      <span class="panel-title">Log <span id="log-count" style="color:var(--dim)">(0)</span></span>
-      <button class="btn btn-ghost" id="log-clear-btn" style="font-size:11px;padding:5px 10px">clear</button>
-    </div>
-    <div class="panel-body" style="padding:0">
-      <div style="display:grid;grid-template-columns:80px 60px 100px 1fr auto;gap:10px;padding:8px 10px;border-bottom:1px solid var(--border)">
-        <span style="font-family:var(--mono);font-size:10px;color:var(--dim);letter-spacing:.06em">TIME</span>
-        <span style="font-family:var(--mono);font-size:10px;color:var(--dim);letter-spacing:.06em">STATUS</span>
-        <span style="font-family:var(--mono);font-size:10px;color:var(--dim);letter-spacing:.06em">ALGORITHM</span>
-        <span style="font-family:var(--mono);font-size:10px;color:var(--dim);letter-spacing:.06em">CLIENT</span>
-        <span style="font-family:var(--mono);font-size:10px;color:var(--dim);letter-spacing:.06em">REM</span>
-      </div>
-      <div class="log-list" id="full-log"><div class="log-empty">No requests yet</div></div>
-    </div>
-  </div>
-</section>
-
-<!-- ══ CHECK ══════════════════════════════════════════════ -->
-<section class="page" id="page-check">
-  <div class="page-title">Check limit</div>
-  <div class="page-sub">Test any algorithm against a client ID</div>
-  <div class="algo-cards" id="algo-selector">
-    <div class="algo-card selected" data-algo="sliding_window">
-      <div class="algo-name">sliding_window</div>
-      <div class="algo-desc">Rolling time window. No burst at boundary edges.</div>
-      <span class="algo-tag">ZSET</span>
-    </div>
-    <div class="algo-card" data-algo="fixed_window">
-      <div class="algo-name">fixed_window</div>
-      <div class="algo-desc">Fixed time buckets. Lowest latency, 2× burst risk.</div>
-      <span class="algo-tag">STRING</span>
-    </div>
-    <div class="algo-card" data-algo="token_bucket">
-      <div class="algo-name">token_bucket</div>
-      <div class="algo-desc">Continuous refill. Allows controlled bursting.</div>
-      <span class="algo-tag">HASH</span>
-    </div>
-  </div>
-  <div class="panel">
-    <div class="panel-header"><span class="panel-title">Parameters</span></div>
-    <div class="panel-body">
-      <div class="form-row three" id="check-params">
-        <div class="form-group"><label class="form-label">Client ID</label><input class="form-input" id="check-client" value="test_user"></div>
-        <div class="form-group" id="check-limit-grp"><label class="form-label">Limit</label><input class="form-input" id="check-limit" type="number" value="10"></div>
-        <div class="form-group" id="check-window-grp"><label class="form-label">Window (sec)</label><input class="form-input" id="check-window" type="number" value="60"></div>
-      </div>
-      <div class="form-row" id="check-bucket-params" style="display:none">
-        <div class="form-group"><label class="form-label">Capacity</label><input class="form-input" id="check-capacity" type="number" value="10"></div>
-        <div class="form-group"><label class="form-label">Refill rate (per sec)</label><input class="form-input" id="check-refill" type="number" value="1" step="0.1"></div>
-      </div>
-      <div style="display:flex;gap:10px;align-items:center">
-        <button class="btn btn-primary" id="check-btn">Send request</button>
-        <button class="btn btn-ghost" id="check-reset-btn">Reset client</button>
-      </div>
-      <div class="result-bar idle" id="check-result" style="margin-top:16px"><span>Configure and send a request</span></div>
-    </div>
-  </div>
-</section>
-
-<!-- ══ SIMULATE ══════════════════════════════════════════ -->
-<section class="page" id="page-simulate">
-  <div class="page-title">Simulate burst</div>
-  <div class="page-sub">Fire N requests — see exactly which are allowed vs blocked</div>
-  <div class="panel">
-    <div class="panel-header"><span class="panel-title">Configuration</span></div>
-    <div class="panel-body">
-      <div class="form-row three">
-        <div class="form-group"><label class="form-label">Algorithm</label>
-          <select class="form-select" id="sim-algo">
-            <option value="sliding_window">sliding_window</option>
-            <option value="fixed_window">fixed_window</option>
-            <option value="token_bucket">token_bucket</option>
-          </select>
-        </div>
-        <div class="form-group"><label class="form-label">Client ID</label><input class="form-input" id="sim-client" value="burst_test"></div>
-        <div class="form-group"><label class="form-label">Request count</label><input class="form-input" id="sim-count" type="number" value="20" min="1" max="100"></div>
-      </div>
-      <div class="form-row three">
-        <div class="form-group"><label class="form-label">Limit</label><input class="form-input" id="sim-limit" type="number" value="10"></div>
-        <div class="form-group"><label class="form-label">Window (sec)</label><input class="form-input" id="sim-window" type="number" value="60"></div>
-        <div class="form-group"><label class="form-label">Refill rate</label><input class="form-input" id="sim-refill" type="number" value="1" step="0.1"></div>
-      </div>
-      <button class="btn btn-primary" id="sim-btn">Run simulation</button>
-    </div>
-  </div>
-  <div class="panel" id="sim-results" style="display:none">
-    <div class="panel-header">
-      <span class="panel-title">Results</span>
-      <div class="sim-summary">
-        <span class="sim-allowed" id="sim-sum-ok">—</span>
-        <span class="sim-blocked" id="sim-sum-fail">—</span>
-        <span style="color:var(--dim);font-family:var(--mono);font-size:12px" id="sim-sum-rate">—</span>
-      </div>
-    </div>
-    <div class="panel-body">
-      <div class="sim-track"><div id="sim-fa" class="sim-fill-a" style="width:0%"></div><div id="sim-fb" class="sim-fill-b" style="width:0%"></div></div>
-      <div class="sim-grid" id="sim-grid"></div>
-    </div>
-  </div>
-</section>
-
-<!-- ══ TOKEN BUCKET LIVE ══════════════════════════════════ -->
-<section class="page" id="page-bucket">
-  <div class="page-title">Token bucket — live</div>
-  <div class="page-sub">Watch tokens drain and refill in real time</div>
-
-  <div class="panel" style="margin-bottom:16px">
-    <div class="panel-header"><span class="panel-title">Configuration</span></div>
-    <div class="panel-body">
-      <div class="form-row three">
-        <div class="form-group"><label class="form-label">Client ID</label><input class="form-input" id="tb-client" value="bucket_demo"></div>
-        <div class="form-group"><label class="form-label">Capacity</label><input class="form-input" id="tb-capacity" type="number" value="10" min="1" max="50"></div>
-        <div class="form-group"><label class="form-label">Refill rate (per sec)</label><input class="form-input" id="tb-rate" type="number" value="1" step="0.5" min="0.1" max="10"></div>
-      </div>
-      <div style="display:flex;gap:10px">
-        <button class="btn btn-primary" id="tb-fire-btn">Consume token</button>
-        <button class="btn btn-ghost" id="tb-reset-btn">Reset bucket</button>
-        <label class="toggle" style="margin-left:8px;align-self:center">
-          <input type="checkbox" id="tb-auto">
-          <div class="toggle-track"></div>
-          <div class="toggle-thumb"></div>
-        </label>
-        <span style="font-family:var(--mono);font-size:12px;color:var(--muted);align-self:center">auto-consume (2/s)</span>
-      </div>
-    </div>
-  </div>
-
-  <div class="two-col">
-    <div class="panel">
-      <div class="panel-header"><span class="panel-title">Bucket state</span></div>
-      <div class="panel-body">
-        <div class="bucket-wrap">
-          <div class="bucket-visual">
-            <svg class="bucket-svg" width="120" height="180" viewBox="0 0 120 180">
-              <!-- bucket outline -->
-              <path d="M15,20 L105,20 L95,170 L25,170 Z" fill="var(--surface2)" stroke="var(--border2)" stroke-width="1.5"/>
-              <!-- token fill (animated height) -->
-              <clipPath id="bucket-clip">
-                <path d="M15,20 L105,20 L95,170 L25,170 Z"/>
-              </clipPath>
-              <rect id="bucket-fill-rect" x="0" y="20" width="120" height="150" fill="var(--blue)" opacity="0.15" clip-path="url(#bucket-clip)" style="transition:height .4s ease,y .4s ease"/>
-              <!-- token circles -->
-              <g id="token-circles"></g>
-              <!-- bucket outline on top -->
-              <path d="M15,20 L105,20 L95,170 L25,170 Z" fill="none" stroke="var(--border2)" stroke-width="1.5"/>
-              <!-- refill drip -->
-              <circle id="drip" cx="60" cy="10" r="4" fill="var(--blue)" opacity="0">
-                <animate id="drip-anim" attributeName="cy" from="10" to="30" dur="0.5s" begin="indefinite" fill="freeze"/>
-                <animate id="drip-fade" attributeName="opacity" from="1" to="0" dur="0.5s" begin="indefinite" fill="freeze"/>
-              </circle>
-              <text x="60" y="190" text-anchor="middle" font-family="var(--mono)" font-size="10" fill="var(--dim)" id="bucket-count-label">10 / 10 tokens</text>
-            </svg>
-          </div>
-          <div class="bucket-info">
-            <div class="bucket-stat">
-              <div class="bucket-stat-label">Tokens remaining</div>
-              <div class="bucket-stat-val" id="tb-tokens" style="color:var(--green)">10</div>
-            </div>
-            <div class="bucket-stat">
-              <div class="bucket-stat-label">Last result</div>
-              <div id="tb-last-result" style="font-family:var(--mono);font-size:13px;color:var(--dim)">—</div>
-            </div>
-            <div class="bucket-stat">
-              <div class="bucket-stat-label">Refill progress</div>
-              <div class="token-refill-bar"><div class="token-refill-fill" id="tb-refill-bar"></div></div>
-              <div style="font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:3px" id="tb-refill-label">+1 token in —s</div>
-            </div>
-            <div class="bucket-stat">
-              <div class="bucket-stat-label">Total consumed</div>
-              <div class="bucket-stat-val" id="tb-consumed" style="font-size:16px;color:var(--muted)">0</div>
-            </div>
+      <div class="card" style="margin:0">
+        <div class="card-header"><span class="card-title">Retry countdown</span><span style="font-size:9px;color:var(--dim)" id="cd-algo-label"></span></div>
+        <div class="card-body">
+          <div class="countdown-inner">
+            <div class="cd-num" id="cd-num">—</div>
+            <div class="cd-label" id="cd-sub">no active block</div>
+            <div class="cd-bar"><div class="cd-fill" id="cd-fill" style="width:0%"></div></div>
           </div>
         </div>
       </div>
     </div>
 
-    <div class="panel">
-      <div class="panel-header"><span class="panel-title">Token events</span></div>
-      <div class="panel-body" style="padding:0">
-        <div class="log-list" id="tb-log"><div class="log-empty">Fire a request to see token events</div></div>
-      </div>
+    <!-- Recent log -->
+    <div class="log-wrap">
+      <div class="log-header"><span class="section-title">Recent requests</span><button class="btn btn-ghost" id="log-clear" style="font-size:10px;padding:4px 10px">clear</button></div>
+      <div class="log-cols"><span class="log-col">time</span><span class="log-col">status</span><span class="log-col">algorithm</span><span class="log-col">client</span><span class="log-col">rem</span></div>
+      <div class="log-list" id="ov-log"><div class="log-empty">No requests yet — enable auto-fire or use the Test tab</div></div>
     </div>
   </div>
-</section>
+</div>
 
-<!-- ══ ALGORITHMS ══════════════════════════════════════════ -->
-<section class="page" id="page-algorithms">
-  <div class="page-title">Algorithms</div>
-  <div class="page-sub">How each algorithm works under the hood</div>
-  <div class="panel">
-    <div class="panel-header"><span class="panel-title">sliding_window</span><span class="algo-tag">ZSET · O(log N)</span></div>
-    <div class="panel-body">
-      <p style="font-size:13px;color:var(--muted);margin-bottom:12px;line-height:1.7">Stores each request as a member of a Redis sorted set scored by timestamp-ms. Atomically prunes expired entries, counts remaining, then inserts if below limit.</p>
-      <div style="background:var(--bg);border:1px solid var(--border);padding:14px;font-family:var(--mono);font-size:11px;color:var(--dim);line-height:1.8">
-        <span style="color:var(--muted)">ZREMRANGEBYSCORE</span> key -∞ (now - window)<br>
-        <span style="color:var(--muted)">ZCARD</span> key → count<br>
-        <span style="color:var(--green)">if</span> count &lt; limit: <span style="color:var(--muted)">ZADD</span> key now member<br>
-        <span style="color:var(--dim)">-- all atomic via Lua script</span>
-      </div>
-      <div class="tag-row" style="margin-top:12px;margin-bottom:0"><span class="tag">no boundary burst</span><span class="tag">O(log N)</span><span class="tag">memory ∝ volume</span></div>
-    </div>
-  </div>
-  <div class="panel">
-    <div class="panel-header"><span class="panel-title">fixed_window</span><span class="algo-tag">STRING · O(1)</span></div>
-    <div class="panel-body">
-      <p style="font-size:13px;color:var(--muted);margin-bottom:12px;line-height:1.7">Counts in fixed time buckets. Key is <code style="color:var(--blue)">rl:fw:{client}:{floor(now/window)}</code>. INCR + auto-expire. Fastest possible — one round-trip.</p>
-      <div style="background:var(--bg);border:1px solid var(--border);padding:14px;font-family:var(--mono);font-size:11px;color:var(--dim);line-height:1.8">
-        bucket = floor(now_ms / window_ms)<br>
-        <span style="color:var(--muted)">INCR</span> <span style="color:var(--blue)">rl:fw:{client}:{bucket}</span><br>
-        <span style="color:var(--green)">if</span> count == 1: <span style="color:var(--muted)">EXPIRE</span> key window+1<br>
-        <span style="color:var(--green)">if</span> count &lt;= limit: allow
-      </div>
-      <div class="tag-row" style="margin-top:12px;margin-bottom:0"><span class="tag">lowest latency</span><span class="tag">O(1) memory</span><span class="tag">2× burst at boundary</span></div>
-    </div>
-  </div>
-  <div class="panel">
-    <div class="panel-header"><span class="panel-title">token_bucket</span><span class="algo-tag">HASH · O(1)</span></div>
-    <div class="panel-body">
-      <p style="font-size:13px;color:var(--muted);margin-bottom:12px;line-height:1.7">Stores <code style="color:var(--blue)">{tokens, last_refill}</code> in a Redis Hash. Virtual refill on every read — no background process needed.</p>
-      <div style="background:var(--bg);border:1px solid var(--border);padding:14px;font-family:var(--mono);font-size:11px;color:var(--dim);line-height:1.8">
-        elapsed = (now - last_refill) / 1000<br>
-        tokens = min(capacity, tokens + elapsed × rate)<br>
-        <span style="color:var(--green)">if</span> tokens ≥ 1: tokens -= 1; allow<br>
-        <span style="color:var(--muted)">HMSET</span> key tokens {tokens} last_refill {now}
-      </div>
-      <div class="tag-row" style="margin-top:12px;margin-bottom:0"><span class="tag">burst tolerance</span><span class="tag">O(1) memory per client</span><span class="tag">smooth refill</span></div>
-    </div>
-  </div>
-</section>
+<!-- ════════ TEST ════════ -->
+<div class="page" id="page-test">
+  <div class="content" style="padding-top:32px">
+    <div style="font-family:var(--display);font-size:24px;font-weight:700;margin-bottom:6px">Check limit</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:24px">Test any algorithm live against Upstash Redis</div>
 
-<!-- ══ ADMIN ══════════════════════════════════════════════ -->
-<section class="page" id="page-admin">
-  <div class="page-title">Admin</div>
-  <div class="page-sub">Reset client counters — requires X-Admin-Key</div>
-  <div class="panel">
-    <div class="panel-header"><span class="panel-title">Authentication</span></div>
-    <div class="panel-body">
-      <div class="form-row" style="grid-template-columns:1fr auto;align-items:end">
-        <div class="form-group"><label class="form-label">Admin API key</label><input class="form-input" id="admin-key" type="password" placeholder="X-Admin-Key value"></div>
-        <button class="btn btn-ghost" id="admin-save-btn">Save</button>
+    <div class="algo-grid" id="algo-selector">
+      <div class="algo-card sel" data-algo="sliding_window">
+        <div class="algo-card-check">✓</div>
+        <div class="algo-name">sliding_window</div>
+        <div class="algo-desc">Rolling window — no boundary burst. Best for smooth rate limiting.</div>
+        <div><span class="algo-badge" style="border-color:rgba(0,255,136,.3);color:var(--green)">ZSET</span> <span class="algo-badge">O(log N)</span></div>
       </div>
-      <div id="admin-key-status" style="font-family:var(--mono);font-size:11px;color:var(--dim);margin-top:6px"></div>
+      <div class="algo-card" data-algo="fixed_window">
+        <div class="algo-card-check">✓</div>
+        <div class="algo-name">fixed_window</div>
+        <div class="algo-desc">Fixed time buckets. Lowest latency — one INCR per request.</div>
+        <div><span class="algo-badge" style="border-color:rgba(68,136,255,.3);color:var(--blue)">STRING</span> <span class="algo-badge">O(1)</span></div>
+      </div>
+      <div class="algo-card" data-algo="token_bucket">
+        <div class="algo-card-check">✓</div>
+        <div class="algo-name">token_bucket</div>
+        <div class="algo-desc">Continuous token refill. Allows controlled bursting.</div>
+        <div><span class="algo-badge" style="border-color:rgba(255,176,32,.3);color:var(--amber)">HASH</span> <span class="algo-badge">O(1)</span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><span class="card-title">Parameters</span></div>
+      <div class="card-body">
+        <div class="form-row three" id="sw-fw-params">
+          <div class="form-group"><label class="form-label">Client ID</label><input class="inp" id="ch-client" value="test_user"></div>
+          <div class="form-group"><label class="form-label">Limit</label><input class="inp" id="ch-limit" type="number" value="10"></div>
+          <div class="form-group"><label class="form-label">Window (s)</label><input class="inp" id="ch-window" type="number" value="60"></div>
+        </div>
+        <div class="form-row" id="tb-params" style="display:none">
+          <div class="form-group"><label class="form-label">Client ID</label><input class="inp" id="ch-tb-client" value="test_user"></div>
+          <div class="form-group"><label class="form-label">Capacity</label><input class="inp" id="ch-capacity" type="number" value="10"></div>
+          <div class="form-group"><label class="form-label">Refill (per s)</label><input class="inp" id="ch-refill" type="number" value="1" step="0.1"></div>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-primary" id="ch-btn">Send request</button>
+          <button class="btn btn-ghost" id="ch-reset">Reset client</button>
+        </div>
+        <div class="result idle" id="ch-result" style="margin-top:14px"><span>Configure above and hit send</span></div>
+      </div>
     </div>
   </div>
-  <div class="panel">
-    <div class="panel-header"><span class="panel-title">Reset client</span></div>
-    <div class="panel-body">
-      <div class="form-row" style="grid-template-columns:1fr auto;align-items:end">
-        <div class="form-group"><label class="form-label">Client ID to reset</label><input class="form-input" id="reset-client" placeholder="client_id"></div>
-        <button class="btn btn-danger" id="reset-btn">Reset</button>
+</div>
+
+<!-- ════════ SIMULATE ════════ -->
+<div class="page" id="page-simulate">
+  <div class="content" style="padding-top:32px">
+    <div style="font-family:var(--display);font-size:24px;font-weight:700;margin-bottom:6px">Burst simulator</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:24px">Fire N requests at once — see exactly which are allowed vs blocked</div>
+
+    <div class="card">
+      <div class="card-header"><span class="card-title">Configuration</span></div>
+      <div class="card-body">
+        <div class="form-row three">
+          <div class="form-group"><label class="form-label">Algorithm</label>
+            <select class="form-select" id="sim-algo">
+              <option value="sliding_window">sliding_window</option>
+              <option value="fixed_window">fixed_window</option>
+              <option value="token_bucket">token_bucket</option>
+            </select>
+          </div>
+          <div class="form-group"><label class="form-label">Client ID</label><input class="inp" id="sim-client" value="burst_test"></div>
+          <div class="form-group"><label class="form-label">Request count</label><input class="inp" id="sim-count" type="number" value="25" min="1" max="100"></div>
+        </div>
+        <div class="form-row three">
+          <div class="form-group"><label class="form-label">Limit</label><input class="inp" id="sim-limit" type="number" value="10"></div>
+          <div class="form-group"><label class="form-label">Window (s)</label><input class="inp" id="sim-window" type="number" value="60"></div>
+          <div class="form-group"><label class="form-label">Refill rate</label><input class="inp" id="sim-refill" type="number" value="1" step="0.1"></div>
+        </div>
+        <button class="btn btn-primary" id="sim-btn">Run simulation</button>
       </div>
-      <div id="reset-result" style="font-family:var(--mono);font-size:12px;color:var(--dim);margin-top:10px"></div>
+    </div>
+
+    <div class="card" id="sim-results" style="display:none">
+      <div class="card-header">
+        <span class="card-title">Results</span>
+        <div style="display:flex;gap:14px;font-size:11px">
+          <span style="color:var(--green)" id="sim-ok-label">—</span>
+          <span style="color:var(--red)" id="sim-fail-label">—</span>
+          <span style="color:var(--muted)" id="sim-rate-label">—</span>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="sim-track"><div class="sim-a" id="sim-a" style="width:0%"></div><div class="sim-b" id="sim-b" style="width:0%"></div></div>
+        <div class="sim-grid" id="sim-grid"></div>
+      </div>
     </div>
   </div>
-</section>
+</div>
+
+<!-- ════════ TOKEN BUCKET LIVE ════════ -->
+<div class="page" id="page-bucket">
+  <div class="content" style="padding-top:32px">
+    <div style="font-family:var(--display);font-size:24px;font-weight:700;margin-bottom:6px">Token bucket — live</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:24px">Watch tokens drain and refill in real time against the actual Redis backend</div>
+
+    <div class="card">
+      <div class="card-header"><span class="card-title">Configuration</span></div>
+      <div class="card-body">
+        <div class="form-row three" style="margin-bottom:12px">
+          <div class="form-group"><label class="form-label">Client ID</label><input class="inp" id="tb-client" value="bucket_live"></div>
+          <div class="form-group"><label class="form-label">Capacity</label><input class="inp" id="tb-cap" type="number" value="10" min="1" max="50"></div>
+          <div class="form-group"><label class="form-label">Refill (per s)</label><input class="inp" id="tb-rate" type="number" value="1" step="0.5" min="0.1" max="10"></div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <button class="btn btn-primary" id="tb-fire">Consume token</button>
+          <button class="btn btn-ghost" id="tb-reset-btn">Reset bucket</button>
+          <label class="toggle" style="margin-left:4px"><input type="checkbox" id="tb-auto"><div class="t-track"></div><div class="t-thumb"></div></label>
+          <span style="font-size:11px;color:var(--muted)">auto (2/s)</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="bucket-scene" style="margin-bottom:20px">
+      <!-- SVG Bucket -->
+      <div style="background:var(--s1);border:1px solid var(--border);padding:20px;display:flex;flex-direction:column;align-items:center">
+        <div style="font-size:9px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin-bottom:12px">Bucket state</div>
+        <svg width="120" height="200" viewBox="0 0 120 200" style="overflow:visible">
+          <defs><clipPath id="bclip"><polygon points="10,25 110,25 100,175 20,175"/></clipPath></defs>
+          <!-- shadow fill -->
+          <rect id="tb-fill" x="0" y="25" width="120" height="150" clip-path="url(#bclip)" fill="var(--blue)" opacity="0.12" style="transition:height .5s ease,y .5s ease"/>
+          <!-- token dots -->
+          <g id="tb-dots"></g>
+          <!-- bucket outline -->
+          <polygon points="10,25 110,25 100,175 20,175" fill="none" stroke="var(--border2)" stroke-width="1.5"/>
+          <!-- top rim -->
+          <line x1="5" y1="25" x2="115" y2="25" stroke="var(--border2)" stroke-width="2" stroke-linecap="round"/>
+          <!-- drip -->
+          <g id="tb-drip" opacity="0">
+            <circle cx="60" cy="14" r="4" fill="var(--blue)"/>
+            <line x1="60" y1="18" x2="60" y2="25" stroke="var(--blue)" stroke-width="1.5"/>
+          </g>
+          <!-- labels -->
+          <text id="tb-count-label" x="60" y="192" text-anchor="middle" font-family="var(--mono)" font-size="9" fill="var(--dim)">10 / 10</text>
+        </svg>
+      </div>
+
+      <!-- Stats + log -->
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <!-- stat cards -->
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+          <div style="background:var(--s1);border:1px solid var(--border);padding:14px">
+            <div style="font-size:9px;color:var(--dim);letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px">Tokens</div>
+            <div style="font-family:var(--display);font-size:28px;font-weight:700;color:var(--green);transition:color .3s" id="tb-tok-val">10</div>
+          </div>
+          <div style="background:var(--s1);border:1px solid var(--border);padding:14px">
+            <div style="font-size:9px;color:var(--dim);letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px">Consumed</div>
+            <div style="font-family:var(--display);font-size:28px;font-weight:700;color:var(--muted)" id="tb-con-val">0</div>
+          </div>
+          <div style="background:var(--s1);border:1px solid var(--border);padding:14px">
+            <div style="font-size:9px;color:var(--dim);letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px">Last</div>
+            <div style="font-size:13px;font-weight:500;transition:color .3s;margin-top:4px" id="tb-last">—</div>
+          </div>
+        </div>
+        <!-- refill bar -->
+        <div style="background:var(--s1);border:1px solid var(--border);padding:14px">
+          <div style="font-size:9px;color:var(--dim);letter-spacing:.08em;text-transform:uppercase;margin-bottom:8px">Refill progress</div>
+          <div style="height:3px;background:var(--border);overflow:hidden;margin-bottom:6px"><div id="tb-rbar" style="height:100%;background:var(--blue);width:0%;transition:width .1s linear"></div></div>
+          <div style="font-size:10px;color:var(--dim)" id="tb-rlabel">+1 token in —</div>
+        </div>
+        <!-- token event log -->
+        <div class="log-wrap" style="flex:1">
+          <div class="log-header"><span class="section-title">Token events</span></div>
+          <div class="log-list" id="tb-log" style="max-height:180px"><div class="log-empty">Fire a request</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════ ALGORITHMS ════════ -->
+<div class="page" id="page-algorithms">
+  <div class="content" style="padding-top:32px">
+    <div style="font-family:var(--display);font-size:24px;font-weight:700;margin-bottom:6px">Algorithms</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:24px">How each algorithm works at the Redis level</div>
+
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">sliding_window</span>
+        <div style="display:flex;gap:6px"><span class="algo-badge" style="border-color:rgba(0,255,136,.3);color:var(--green)">ZSET</span><span class="algo-badge">O(log N)</span><span class="algo-badge">no boundary burst</span></div>
+      </div>
+      <div class="card-body">
+        <p style="font-size:12px;color:var(--muted);line-height:1.8;margin-bottom:14px">Each request is stored as a scored member in a Redis sorted set, where the score is the current timestamp in milliseconds. On every request, a Lua script atomically removes all entries older than the window, counts the remaining entries, and if under the limit, adds the new request.</p>
+        <div class="code-block"><span class="c-cm">-- atomic Lua script (single round-trip)</span><br>
+<span class="c-fn">ZREMRANGEBYSCORE</span> key <span class="c-num">-inf</span> (now - window_ms)<br>
+count = <span class="c-fn">ZCARD</span> key<br>
+<span class="c-kw">if</span> count &lt; limit:<br>
+&nbsp;&nbsp;<span class="c-fn">ZADD</span> key now <span class="c-str">"{now}-{seq}"</span>  <span class="c-cm">-- seq avoids collision</span><br>
+&nbsp;&nbsp;<span class="c-fn">PEXPIRE</span> key window_ms + 1000<br>
+&nbsp;&nbsp;<span class="c-kw">return</span> {<span class="c-num">1</span>, limit - count - <span class="c-num">1</span>, <span class="c-num">0</span>}<br>
+<span class="c-kw">else</span>:<br>
+&nbsp;&nbsp;retry = oldest_score + window_ms - now<br>
+&nbsp;&nbsp;<span class="c-kw">return</span> {<span class="c-num">0</span>, <span class="c-num">0</span>, retry}</div>
+        <div class="tag-row"><span class="tag">smooth limiting</span><span class="tag">no boundary burst</span><span class="tag">memory ∝ request volume</span><span class="tag">best general purpose</span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">fixed_window</span>
+        <div style="display:flex;gap:6px"><span class="algo-badge" style="border-color:rgba(68,136,255,.3);color:var(--blue)">STRING</span><span class="algo-badge">O(1)</span><span class="algo-badge">lowest latency</span></div>
+      </div>
+      <div class="card-body">
+        <p style="font-size:12px;color:var(--muted);line-height:1.8;margin-bottom:14px">Requests are counted in fixed time buckets. The Redis key includes the bucket number derived from the current timestamp, so keys auto-rotate without any cleanup. One INCR per request — the fastest possible implementation.</p>
+        <div class="code-block">bucket = floor(now_ms / window_ms)<br>
+key = <span class="c-str">"rl:fw:{client}:{bucket}"</span><br>
+count = <span class="c-fn">INCR</span> key<br>
+<span class="c-kw">if</span> count == <span class="c-num">1</span>: <span class="c-fn">EXPIRE</span> key window_sec + <span class="c-num">1</span><br>
+<span class="c-kw">if</span> count &lt;= limit: allow<br>
+<span class="c-cm">-- tradeoff: 2× burst possible at window boundary</span></div>
+        <div class="tag-row"><span class="tag">O(1) memory</span><span class="tag">one Redis call</span><span class="tag">2× burst at boundary</span><span class="tag">auto-expiry</span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">token_bucket</span>
+        <div style="display:flex;gap:6px"><span class="algo-badge" style="border-color:rgba(255,176,32,.3);color:var(--amber)">HASH</span><span class="algo-badge">O(1)</span><span class="algo-badge">burst-tolerant</span></div>
+      </div>
+      <div class="card-body">
+        <p style="font-size:12px;color:var(--muted);line-height:1.8;margin-bottom:14px">Stores <code style="color:var(--blue)">tokens</code> and <code style="color:var(--blue)">last_refill</code> in a Redis Hash. On every request, the script virtually refills based on elapsed time (no background worker needed), then consumes one token if available.</p>
+        <div class="code-block">data = <span class="c-fn">HMGET</span> key <span class="c-str">"tokens"</span> <span class="c-str">"last_refill"</span><br>
+elapsed = (now - last_refill) / <span class="c-num">1000.0</span><br>
+tokens = min(capacity, tokens + elapsed × rate)<br>
+<span class="c-kw">if</span> tokens &gt;= <span class="c-num">1</span>:<br>
+&nbsp;&nbsp;tokens -= <span class="c-num">1</span><br>
+&nbsp;&nbsp;<span class="c-fn">HMSET</span> key tokens {tokens} last_refill {now}<br>
+&nbsp;&nbsp;<span class="c-kw">return</span> allow<br>
+<span class="c-cm">-- O(1) memory regardless of request volume</span></div>
+        <div class="tag-row"><span class="tag">burst tolerance</span><span class="tag">smooth refill</span><span class="tag">O(1) per client</span><span class="tag">no background worker</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════ ADMIN ════════ -->
+<div class="page" id="page-admin">
+  <div class="content" style="padding-top:32px">
+    <div style="font-family:var(--display);font-size:24px;font-weight:700;margin-bottom:6px">Admin</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:24px">Authenticated operations — requires X-Admin-Key header</div>
+    <div class="admin-grid">
+      <div class="card" style="margin:0">
+        <div class="card-header"><span class="card-title">API key</span></div>
+        <div class="card-body">
+          <div class="form-group" style="margin-bottom:10px"><label class="form-label">X-Admin-Key</label><input class="inp" id="admin-key" type="password" placeholder="your admin key"></div>
+          <button class="btn btn-ghost" id="admin-save">Save to localStorage</button>
+          <div style="font-size:10px;color:var(--dim);margin-top:8px" id="admin-status"></div>
+        </div>
+      </div>
+      <div class="card" style="margin:0">
+        <div class="card-header"><span class="card-title">Reset client</span></div>
+        <div class="card-body">
+          <div class="form-group" style="margin-bottom:10px"><label class="form-label">Client ID</label><input class="inp" id="admin-client" placeholder="client_id to reset"></div>
+          <button class="btn btn-red" id="admin-reset">Reset all counters</button>
+          <div style="font-size:10px;color:var(--dim);margin-top:8px" id="admin-result"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 
 </main>
 </div>
-<div class="toast-wrap" id="toast-wrap"></div>
+<div class="toast-wrap" id="toasts"></div>
 
 <script>
-// ════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════
 // STATE
-// ════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════
 const S = {
-  log: [], stats: { allowed: 0, blocked: 0 },
-  adminKey: localStorage.getItem('rl_admin_key') || '',
-  // gauge
-  gaugeUsed: 0, gaugeLimit: 10,
-  // sparkline: 30-second rolling window of req counts
-  spark: new Array(30).fill(0), sparkTick: 0, sparkReqThisSec: 0,
-  // autofire
-  autofireTimer: null,
-  // countdown
-  countdownSecs: 0, countdownMax: 0, countdownTimer: null,
-  // token bucket local state (for visualization)
-  tbTokens: 10, tbCapacity: 10, tbRefillRate: 1, tbConsumed: 0,
-  tbLastFire: Date.now(), tbAutoTimer: null, tbRefillTimer: null,
+  log:[], stats:{allowed:0,blocked:0},
+  adminKey: localStorage.getItem('rl_admin_key')||'',
+  spark: new Array(30).fill(0), sparkAllow: new Array(30).fill(0), sparkBlock: new Array(30).fill(0),
+  sparkRps:0,
+  gaugeUsed:0, gaugeLimit:10,
+  afTimer:null,
+  cdSecs:0, cdMax:0, cdTimer:null,
+  tbTokens:10, tbCap:10, tbRate:1, tbConsumed:0, tbRefillProg:0,
+  tbAutoTimer:null,
 };
-if (S.adminKey) document.getElementById('admin-key').value = S.adminKey;
+if(S.adminKey) document.getElementById('admin-key').value = S.adminKey;
 
-// ════════════════════════════════════════════════════════
-// NAV
-// ════════════════════════════════════════════════════════
-document.querySelectorAll('.nav-item').forEach(item => {
-  item.addEventListener('click', () => {
-    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-    item.classList.add('active');
-    document.getElementById('page-' + item.dataset.page).classList.add('active');
-  });
+// ═══════════════════════════════════════════════
+// NAV — tabs + sidebar both work
+// ═══════════════════════════════════════════════
+function navTo(page){
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+  document.getElementById('page-'+page).classList.add('active');
+  document.querySelector(`.tab-btn[data-page="${page}"]`)?.classList.add('active');
+  document.querySelector(`.nav-item[data-page="${page}"]`)?.classList.add('active');
+}
+document.querySelectorAll('.tab-btn, .nav-item').forEach(el=>{
+  el.addEventListener('click',()=>navTo(el.dataset.page));
 });
 
-// ════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════
 // TOAST
-// ════════════════════════════════════════════════════════
-function toast(msg, type = 'ok') {
-  const el = document.createElement('div');
-  el.className = `toast ${type}`;
-  el.innerHTML = `<span style="color:${type==='ok'?'var(--green)':'var(--red)'}">${type==='ok'?'✓':'✗'}</span> ${msg}`;
-  document.getElementById('toast-wrap').appendChild(el);
-  setTimeout(() => el.remove(), 3000);
+// ═══════════════════════════════════════════════
+function toast(msg,type='ok'){
+  const el=document.createElement('div');
+  el.className=`toast ${type}`;
+  el.innerHTML=`<span style="color:${type==='ok'?'var(--green)':'var(--red)'}">${type==='ok'?'✓':'✗'}</span>${msg}`;
+  document.getElementById('toasts').appendChild(el);
+  setTimeout(()=>el.remove(),3000);
 }
 
-// ════════════════════════════════════════════════════════
-// STATUS CHECK
-// ════════════════════════════════════════════════════════
-async function checkStatus() {
-  try {
-    const r = await fetch('/health');
-    const d = await r.json();
-    const dot = document.getElementById('status-dot');
-    document.getElementById('status-text').textContent = d.redis_connected ? 'connected' : 'degraded';
-    dot.classList.toggle('live', d.redis_connected);
-    document.getElementById('ov-redis').textContent = d.redis_connected ? 'OK' : 'ERR';
-  } catch {
+// ═══════════════════════════════════════════════
+// STATUS
+// ═══════════════════════════════════════════════
+async function checkStatus(){
+  try{
+    const r=await fetch('/health');const d=await r.json();
+    const ok=d.redis_connected;
+    document.getElementById('status-dot').classList.toggle('live',ok);
+    document.getElementById('conn-label').textContent=ok?'redis connected':'degraded';
+    document.getElementById('m-redis').textContent=ok?'OK':'ERR';
+  }catch{
     document.getElementById('status-dot').classList.remove('live');
-    document.getElementById('status-text').textContent = 'offline';
+    document.getElementById('conn-label').textContent='offline';
   }
 }
-checkStatus();
-setInterval(checkStatus, 10000);
+checkStatus(); setInterval(checkStatus,10000);
 
-// ════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════
 // LOG
-// ════════════════════════════════════════════════════════
-function nowTs() { return new Date().toTimeString().slice(0,8); }
+// ═══════════════════════════════════════════════
+function ts(){return new Date().toTimeString().slice(0,8)}
 
-function addLog(entry) {
-  S.log.unshift(entry);
-  if (S.log.length > 200) S.log.pop();
-  if (entry.allowed) S.stats.allowed++; else S.stats.blocked++;
-  S.sparkReqThisSec++;
-  updateStats();
-  updateGauge(entry);
-  renderLog('ov-log', S.log.slice(0, 8));
-  renderLog('full-log', S.log);
-  document.getElementById('log-count').textContent = `(${S.log.length})`;
+function addLog(e){
+  S.log.unshift(e); if(S.log.length>300)S.log.pop();
+  if(e.allowed)S.stats.allowed++; else S.stats.blocked++;
+  S.sparkRps++;
+  updateMetrics(); updateGauge(e);
+  renderLog('ov-log', S.log.slice(0,12));
+  document.getElementById('log-count')&&(document.getElementById('log-count').textContent=`(${S.log.length})`);
 }
 
-function renderLog(id, entries) {
-  const el = document.getElementById(id);
-  if (!entries.length) { el.innerHTML = '<div class="log-empty">No requests yet</div>'; return; }
-  el.innerHTML = entries.map(e => `
-    <div class="log-entry ${e.allowed?'ok':'fail'}">
+function renderLog(id, entries){
+  const el=document.getElementById(id); if(!el)return;
+  if(!entries.length){el.innerHTML='<div class="log-empty">No requests yet</div>';return}
+  el.innerHTML=entries.map(e=>`
+    <div class="log-row ${e.allowed?'ok':'fail'}">
       <span class="log-ts">${e.ts}</span>
       <span class="log-badge ${e.allowed?'ok':'fail'}">${e.allowed?'ALLOW':'BLOCK'}</span>
       <span class="log-algo">${e.algo}</span>
-      <span class="log-id">${e.client}</span>
-      <span class="log-rem">${e.remaining??'—'}</span>
+      <span class="log-client">${e.client}</span>
+      <span class="log-rem">${e.rem??'—'}</span>
     </div>`).join('');
 }
 
-function updateStats() {
-  document.getElementById('ov-allowed').textContent = S.stats.allowed;
-  document.getElementById('ov-blocked').textContent = S.stats.blocked;
-  const total = S.stats.allowed + S.stats.blocked;
-  document.getElementById('ov-rate').textContent = total ? ((S.stats.blocked/total)*100).toFixed(1)+'%' : '—';
+function updateMetrics(){
+  document.getElementById('m-allowed').textContent=S.stats.allowed;
+  document.getElementById('m-blocked').textContent=S.stats.blocked;
+  const t=S.stats.allowed+S.stats.blocked;
+  document.getElementById('m-rate').textContent=t?((S.stats.blocked/t)*100).toFixed(1)+'%':'—';
 }
 
-// ════════════════════════════════════════════════════════
-// PRESSURE GAUGE
-// ════════════════════════════════════════════════════════
-function updateGauge(entry) {
-  const limit = parseInt(document.getElementById('af-limit').value) || 10;
-  S.gaugeLimit = limit;
-  if (entry.allowed) {
-    S.gaugeUsed = Math.max(0, limit - (entry.remaining ?? 0));
-  } else {
-    S.gaugeUsed = limit;
-  }
-  const pct = Math.min(1, S.gaugeUsed / limit);
-  // arc: total arc length ~220, we rotate 270deg (135deg start, 270deg sweep)
-  const ARC = 220;
-  const offset = ARC - pct * ARC;
-  const arc = document.getElementById('gauge-arc');
-  arc.style.strokeDashoffset = offset;
-
-  let color = 'var(--green)';
-  if (pct >= 0.9) color = 'var(--red)';
-  else if (pct >= 0.6) color = 'var(--amber)';
-  arc.style.stroke = color;
-  arc.classList.toggle('danger', pct >= 1);
-
-  const numEl = document.getElementById('gauge-num');
-  numEl.textContent = Math.round(pct*100) + '%';
-  numEl.style.fill = color;
-  document.getElementById('gauge-used').textContent = S.gaugeUsed;
-  document.getElementById('gauge-limit').textContent = limit;
-  document.getElementById('gauge-max-label').textContent = limit;
+// ═══════════════════════════════════════════════
+// GAUGE
+// ═══════════════════════════════════════════════
+function updateGauge(entry){
+  const limit=parseInt(document.getElementById('af-limit').value)||10;
+  S.gaugeLimit=limit;
+  S.gaugeUsed=entry.allowed?Math.max(0,limit-(entry.rem??0)):limit;
+  const pct=Math.min(1,S.gaugeUsed/limit);
+  const ARC=196;
+  document.getElementById('gauge-arc').style.strokeDashoffset=(ARC-(pct*ARC));
+  const col=pct>=.9?'var(--red)':pct>=.6?'var(--amber)':'var(--green)';
+  document.getElementById('gauge-arc').style.stroke=col;
+  document.getElementById('g-pct').textContent=Math.round(pct*100)+'%';
+  document.getElementById('g-pct').style.fill=col;
+  document.getElementById('g-used').textContent=S.gaugeUsed;
+  document.getElementById('g-lim').textContent=limit;
+  document.getElementById('g-max').textContent=limit;
 }
 
-// ════════════════════════════════════════════════════════
-// SPARKLINE
-// ════════════════════════════════════════════════════════
-function drawSparkline() {
-  const canvas = document.getElementById('spark-canvas');
-  if (!canvas) return;
-  const ctx = canvas.getContext('2d');
-  const W = canvas.offsetWidth || 300;
-  const H = 56;
-  canvas.width = W; canvas.height = H;
-  ctx.clearRect(0, 0, W, H);
+// ═══════════════════════════════════════════════
+// SPARKLINE (dual: allowed green + blocked red)
+// ═══════════════════════════════════════════════
+function drawSpark(){
+  const canvas=document.getElementById('spark');
+  if(!canvas)return;
+  const W=canvas.offsetWidth||400, H=72;
+  canvas.width=W; canvas.height=H;
+  const ctx=canvas.getContext('2d');
+  ctx.clearRect(0,0,W,H);
+  const a=S.sparkAllow, b=S.sparkBlock;
+  const max=Math.max(1,...a.map((v,i)=>v+b[i]));
+  const step=W/(a.length-1);
 
-  const data = S.spark;
-  const max = Math.max(1, ...data);
-  const step = W / (data.length - 1);
+  // draw allowed area
+  const ga=ctx.createLinearGradient(0,0,0,H);
+  ga.addColorStop(0,'rgba(0,255,136,0.2)'); ga.addColorStop(1,'rgba(0,255,136,0)');
+  ctx.beginPath(); ctx.moveTo(0,H);
+  a.forEach((v,i)=>ctx.lineTo(i*step, H-(v/max)*(H-8)));
+  ctx.lineTo(W,H); ctx.fillStyle=ga; ctx.fill();
 
-  // grid line at top
-  ctx.strokeStyle = 'rgba(255,255,255,0.04)';
-  ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(W, 0); ctx.stroke();
-
-  // fill
-  const grad = ctx.createLinearGradient(0, 0, 0, H);
-  grad.addColorStop(0, 'rgba(96,165,250,0.2)');
-  grad.addColorStop(1, 'rgba(96,165,250,0)');
-  ctx.beginPath();
-  ctx.moveTo(0, H);
-  data.forEach((v, i) => {
-    const x = i * step;
-    const y = H - (v / max) * (H - 6);
-    i === 0 ? ctx.lineTo(x, y) : ctx.lineTo(x, y);
-  });
-  ctx.lineTo(W, H);
-  ctx.fillStyle = grad;
-  ctx.fill();
-
-  // line
-  ctx.beginPath();
-  ctx.strokeStyle = '#60a5fa';
-  ctx.lineWidth = 1.5;
-  ctx.lineJoin = 'round';
-  data.forEach((v, i) => {
-    const x = i * step;
-    const y = H - (v / max) * (H - 6);
-    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-  });
+  ctx.beginPath(); ctx.strokeStyle='#00ff88'; ctx.lineWidth=1.5; ctx.lineJoin='round';
+  a.forEach((v,i)=>{const x=i*step,y=H-(v/max)*(H-8); i===0?ctx.moveTo(x,y):ctx.lineTo(x,y)});
   ctx.stroke();
 
-  // current value dot
-  const lastV = data[data.length - 1];
-  const lx = (data.length - 1) * step;
-  const ly = H - (lastV / max) * (H - 6);
-  ctx.beginPath();
-  ctx.arc(lx, ly, 3, 0, Math.PI * 2);
-  ctx.fillStyle = '#60a5fa';
-  ctx.fill();
+  // draw blocked area on top
+  const gb=ctx.createLinearGradient(0,0,0,H);
+  gb.addColorStop(0,'rgba(255,68,102,0.25)'); gb.addColorStop(1,'rgba(255,68,102,0)');
+  ctx.beginPath(); ctx.moveTo(0,H);
+  b.forEach((v,i)=>ctx.lineTo(i*step, H-(v/max)*(H-8)));
+  ctx.lineTo(W,H); ctx.fillStyle=gb; ctx.fill();
+
+  ctx.beginPath(); ctx.strokeStyle='#ff4466'; ctx.lineWidth=1.2; ctx.lineJoin='round';
+  b.forEach((v,i)=>{const x=i*step,y=H-(v/max)*(H-8); i===0?ctx.moveTo(x,y):ctx.lineTo(x,y)});
+  ctx.stroke();
 }
 
-// Tick sparkline every second
-setInterval(() => {
-  S.spark.push(S.sparkReqThisSec);
-  if (S.spark.length > 30) S.spark.shift();
-  S.sparkReqThisSec = 0;
-  drawSparkline();
-}, 1000);
-drawSparkline();
+// track allowed/blocked per second separately
+let _secAllowed=0, _secBlocked=0;
+setInterval(()=>{
+  S.sparkAllow.push(_secAllowed); if(S.sparkAllow.length>30)S.sparkAllow.shift();
+  S.sparkBlock.push(_secBlocked); if(S.sparkBlock.length>30)S.sparkBlock.shift();
+  document.getElementById('spark-rps').textContent=(_secAllowed+_secBlocked)+' req/s';
+  _secAllowed=0; _secBlocked=0;
+  drawSpark();
+},1000);
 
-// ════════════════════════════════════════════════════════
-// COUNTDOWN TIMER
-// ════════════════════════════════════════════════════════
-function startCountdown(seconds) {
-  if (S.countdownTimer) clearInterval(S.countdownTimer);
-  S.countdownSecs = seconds;
-  S.countdownMax = seconds;
-  renderCountdown();
-  S.countdownTimer = setInterval(() => {
-    S.countdownSecs--;
-    renderCountdown();
-    if (S.countdownSecs <= 0) {
-      clearInterval(S.countdownTimer);
-      S.countdownTimer = null;
-    }
-  }, 1000);
+// ═══════════════════════════════════════════════
+// COUNTDOWN
+// ═══════════════════════════════════════════════
+function startCd(secs,algo=''){
+  if(S.cdTimer)clearInterval(S.cdTimer);
+  S.cdSecs=secs; S.cdMax=secs;
+  document.getElementById('cd-algo-label').textContent=algo;
+  tickCd();
+  S.cdTimer=setInterval(()=>{S.cdSecs--;tickCd();if(S.cdSecs<=0)clearInterval(S.cdTimer)},1000);
 }
-
-function renderCountdown() {
-  const numEl = document.getElementById('cd-num');
-  const subEl = document.getElementById('cd-sub');
-  const fillEl = document.getElementById('cd-fill');
-  if (S.countdownSecs <= 0) {
-    numEl.textContent = '✓';
-    numEl.className = 'countdown-num ready';
-    subEl.textContent = 'READY TO RETRY';
-    fillEl.style.width = '0%';
-    fillEl.className = 'countdown-fill ready';
+function tickCd(){
+  const n=document.getElementById('cd-num');
+  const s=document.getElementById('cd-sub');
+  const f=document.getElementById('cd-fill');
+  if(S.cdSecs<=0){
+    n.textContent='✓'; n.className='cd-num ready';
+    s.textContent='READY TO RETRY';
+    f.style.width='0%'; f.className='cd-fill ready';
   } else {
-    numEl.textContent = S.countdownSecs + 's';
-    numEl.className = 'countdown-num';
-    subEl.textContent = 'RETRY AFTER';
-    const pct = (S.countdownSecs / S.countdownMax) * 100;
-    fillEl.style.width = pct + '%';
-    fillEl.className = 'countdown-fill';
+    n.textContent=S.cdSecs+'s'; n.className='cd-num';
+    s.textContent='RETRY AFTER';
+    f.style.width=((S.cdSecs/S.cdMax)*100)+'%';
+    f.className='cd-fill';
   }
 }
 
-// ════════════════════════════════════════════════════════
-// AUTO-FIRE
-// ════════════════════════════════════════════════════════
-document.getElementById('autofire-toggle').addEventListener('change', function() {
-  if (this.checked) startAutofire();
-  else stopAutofire();
+// ═══════════════════════════════════════════════
+// AUTOFIRE
+// ═══════════════════════════════════════════════
+document.getElementById('af-toggle').addEventListener('change',function(){
+  if(this.checked)startAf(); else stopAf();
+});
+document.getElementById('af-rps').addEventListener('change',()=>{
+  if(document.getElementById('af-toggle').checked){stopAf();startAf();}
 });
 
-function startAutofire() {
-  const rateInput = parseInt(document.getElementById('af-rate').value) || 2;
-  const interval = Math.max(100, Math.round(1000 / rateInput));
-  S.autofireTimer = setInterval(fireAutoRequest, interval);
+function startAf(){
+  const rps=parseInt(document.getElementById('af-rps').value)||2;
+  S.afTimer=setInterval(fireAf, Math.max(100,Math.round(1000/rps)));
 }
-
-function stopAutofire() {
-  if (S.autofireTimer) { clearInterval(S.autofireTimer); S.autofireTimer = null; }
-  document.getElementById('af-result').className = 'result-bar idle';
-  document.getElementById('af-result').innerHTML = '<span>Auto-fire stopped</span>';
+function stopAf(){
+  clearInterval(S.afTimer); S.afTimer=null;
+  setResult('af-result','idle','Auto-fire stopped');
 }
-
-async function fireAutoRequest() {
-  const client = document.getElementById('af-client').value.trim() || 'demo';
-  const limit = document.getElementById('af-limit').value || 10;
-  try {
-    const r = await fetch(`/check/sliding_window?client_id=${encodeURIComponent(client)}&limit=${limit}&window_seconds=60`);
-    const d = await r.json();
-    const allowed = r.ok;
-    const resultEl = document.getElementById('af-result');
-    resultEl.className = 'result-bar ' + (allowed ? 'allowed' : 'blocked');
-    if (allowed) {
-      resultEl.innerHTML = `<span class="result-tag">ALLOWED</span> ${d.remaining} remaining`;
+async function fireAf(){
+  const client=document.getElementById('af-client').value.trim()||'demo';
+  const limit=document.getElementById('af-limit').value||10;
+  try{
+    const r=await fetch(`/check/sliding_window?client_id=${encodeURIComponent(client)}&limit=${limit}&window_seconds=60`);
+    const d=await r.json(); const ok=r.ok;
+    if(ok){_secAllowed++;}else{_secBlocked++;}
+    if(ok){
+      setResult('af-result','ok',`<span class="result-tag">ALLOWED</span> ${d.remaining} remaining`);
     } else {
-      const retry = d.detail?.retry_after_seconds ?? 60;
-      resultEl.innerHTML = `<span class="result-tag">BLOCKED</span> retry after ${retry}s`;
-      startCountdown(retry);
+      const retry=d.detail?.retry_after_seconds??60;
+      setResult('af-result','blocked',`<span class="result-tag">BLOCKED</span> retry in ${retry}s`);
+      startCd(retry,'sliding_window');
     }
-    addLog({ ts: nowTs(), allowed, algo: 'sliding_window', client, remaining: d.remaining ?? 0 });
-  } catch(e) { /* silent fail on auto-fire */ }
+    addLog({ts:ts(),allowed:ok,algo:'sliding_window',client,rem:d.remaining??0});
+  }catch{}
 }
 
-// Re-start autofire when rate changes
-document.getElementById('af-rate').addEventListener('change', () => {
-  if (document.getElementById('autofire-toggle').checked) {
-    stopAutofire(); startAutofire();
-  }
-});
-
-// ════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════
 // CHECK PAGE
-// ════════════════════════════════════════════════════════
-let selectedAlgo = 'sliding_window';
-document.querySelectorAll('.algo-card').forEach(card => {
-  card.addEventListener('click', () => {
-    document.querySelectorAll('.algo-card').forEach(c => c.classList.remove('selected'));
-    card.classList.add('selected');
-    selectedAlgo = card.dataset.algo;
-    document.getElementById('check-limit-grp').style.display = selectedAlgo === 'token_bucket' ? 'none' : '';
-    document.getElementById('check-window-grp').style.display = selectedAlgo === 'token_bucket' ? 'none' : '';
-    document.getElementById('check-bucket-params').style.display = selectedAlgo === 'token_bucket' ? 'grid' : 'none';
+// ═══════════════════════════════════════════════
+let selAlgo='sliding_window';
+document.querySelectorAll('.algo-card').forEach(c=>{
+  c.addEventListener('click',()=>{
+    document.querySelectorAll('.algo-card').forEach(x=>x.classList.remove('sel'));
+    c.classList.add('sel'); selAlgo=c.dataset.algo;
+    document.getElementById('sw-fw-params').style.display=selAlgo==='token_bucket'?'none':'grid';
+    document.getElementById('tb-params').style.display=selAlgo==='token_bucket'?'grid':'none';
   });
 });
 
-document.getElementById('check-btn').addEventListener('click', async () => {
-  const client = document.getElementById('check-client').value.trim() || 'test_user';
-  const btn = document.getElementById('check-btn');
-  btn.disabled = true; btn.innerHTML = '<span class="spin"></span>';
+document.getElementById('ch-btn').addEventListener('click',async()=>{
+  const btn=document.getElementById('ch-btn');
+  btn.disabled=true; btn.innerHTML='<span class="spin"></span>';
   let url;
-  if (selectedAlgo === 'token_bucket') {
-    url = `/check/token_bucket?client_id=${encodeURIComponent(client)}&capacity=${document.getElementById('check-capacity').value}&refill_rate=${document.getElementById('check-refill').value}`;
+  if(selAlgo==='token_bucket'){
+    const c=document.getElementById('ch-tb-client').value.trim()||'test_user';
+    url=`/check/token_bucket?client_id=${encodeURIComponent(c)}&capacity=${document.getElementById('ch-capacity').value}&refill_rate=${document.getElementById('ch-refill').value}`;
   } else {
-    url = `/check/${selectedAlgo}?client_id=${encodeURIComponent(client)}&limit=${document.getElementById('check-limit').value}&window_seconds=${document.getElementById('check-window').value}`;
+    const c=document.getElementById('ch-client').value.trim()||'test_user';
+    url=`/check/${selAlgo}?client_id=${encodeURIComponent(c)}&limit=${document.getElementById('ch-limit').value}&window_seconds=${document.getElementById('ch-window').value}`;
   }
-  try {
-    const r = await fetch(url);
-    const d = await r.json();
-    const allowed = r.ok;
-    const result = document.getElementById('check-result');
-    result.className = 'result-bar ' + (allowed ? 'allowed' : 'blocked');
-    if (allowed) {
-      result.innerHTML = `<span class="result-tag">ALLOWED</span> remaining: ${d.remaining} &nbsp;·&nbsp; limit: ${d.limit} &nbsp;·&nbsp; algo: ${d.algorithm}`;
+  const client=selAlgo==='token_bucket'?document.getElementById('ch-tb-client').value.trim():document.getElementById('ch-client').value.trim();
+  try{
+    const r=await fetch(url); const d=await r.json(); const ok=r.ok;
+    if(ok){
+      setResult('ch-result','ok',`<span class="result-tag">ALLOWED</span> remaining: ${d.remaining} · limit: ${d.limit} · ${d.algorithm}`);
+      _secAllowed++;
     } else {
-      const detail = d.detail || {};
-      result.innerHTML = `<span class="result-tag">BLOCKED</span> retry after ${detail.retry_after_seconds ?? '?'}s`;
-      startCountdown(detail.retry_after_seconds ?? 60);
+      const retry=d.detail?.retry_after_seconds??60;
+      setResult('ch-result','blocked',`<span class="result-tag">BLOCKED</span> retry after ${retry}s`);
+      startCd(retry,selAlgo);
+      _secBlocked++;
     }
-    addLog({ ts: nowTs(), allowed, algo: selectedAlgo, client, remaining: d.remaining ?? 0 });
-  } catch(e) { toast('Request failed', 'fail'); }
-  btn.disabled = false; btn.textContent = 'Send request';
+    addLog({ts:ts(),allowed:ok,algo:selAlgo,client,rem:d.remaining??0});
+  }catch{toast('Request failed','fail')}
+  btn.disabled=false; btn.textContent='Send request';
 });
 
-document.getElementById('check-reset-btn').addEventListener('click', async () => {
-  await resetClient(document.getElementById('check-client').value.trim() || 'test_user');
+document.getElementById('ch-reset').addEventListener('click',async()=>{
+  const c=(selAlgo==='token_bucket'?document.getElementById('ch-tb-client'):document.getElementById('ch-client')).value.trim();
+  await resetClient(c);
 });
 
-// ════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════
 // SIMULATE
-// ════════════════════════════════════════════════════════
-document.getElementById('sim-btn').addEventListener('click', async () => {
-  const btn = document.getElementById('sim-btn');
-  btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Running';
-  const body = {
-    algorithm: document.getElementById('sim-algo').value,
-    client_id: document.getElementById('sim-client').value || 'burst_test',
-    request_count: parseInt(document.getElementById('sim-count').value),
-    limit: parseInt(document.getElementById('sim-limit').value),
-    window_seconds: parseInt(document.getElementById('sim-window').value),
-    refill_rate: parseFloat(document.getElementById('sim-refill').value),
-    capacity: parseInt(document.getElementById('sim-limit').value),
+// ═══════════════════════════════════════════════
+document.getElementById('sim-btn').addEventListener('click',async()=>{
+  const btn=document.getElementById('sim-btn');
+  btn.disabled=true; btn.innerHTML='<span class="spin"></span> Running';
+  const body={
+    algorithm:document.getElementById('sim-algo').value,
+    client_id:document.getElementById('sim-client').value||'burst_test',
+    request_count:parseInt(document.getElementById('sim-count').value),
+    limit:parseInt(document.getElementById('sim-limit').value),
+    window_seconds:parseInt(document.getElementById('sim-window').value),
+    refill_rate:parseFloat(document.getElementById('sim-refill').value),
+    capacity:parseInt(document.getElementById('sim-limit').value),
   };
-  try {
-    const r = await fetch('/simulate', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
-    const d = await r.json();
-    document.getElementById('sim-results').style.display = 'block';
-    const aPct = (d.allowed / d.total_requests * 100).toFixed(1);
-    const bPct = (d.blocked / d.total_requests * 100).toFixed(1);
-    document.getElementById('sim-fa').style.width = aPct + '%';
-    document.getElementById('sim-fb').style.width = bPct + '%';
-    document.getElementById('sim-sum-ok').textContent = `${d.allowed} allowed`;
-    document.getElementById('sim-sum-fail').textContent = `${d.blocked} blocked`;
-    document.getElementById('sim-sum-rate').textContent = `${d.block_rate_pct}% block rate`;
-    const grid = document.getElementById('sim-grid');
-    grid.innerHTML = d.results.map(req =>
-      `<div class="sim-cell ${req.allowed?'ok':'fail'}" title="req ${req.request_number}: ${req.allowed?'allowed':'blocked'}, rem=${req.remaining}">${req.request_number}</div>`
-    ).join('');
-    d.results.forEach(req => addLog({ ts: nowTs(), allowed: req.allowed, algo: body.algorithm, client: body.client_id, remaining: req.remaining }));
-  } catch(e) { toast('Simulation failed', 'fail'); }
-  btn.disabled = false; btn.textContent = 'Run simulation';
+  try{
+    const r=await fetch('/simulate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const d=await r.json();
+    document.getElementById('sim-results').style.display='block';
+    const ap=(d.allowed/d.total_requests*100).toFixed(1);
+    const bp=(d.blocked/d.total_requests*100).toFixed(1);
+    document.getElementById('sim-a').style.width=ap+'%';
+    document.getElementById('sim-b').style.width=bp+'%';
+    document.getElementById('sim-ok-label').textContent=`${d.allowed} allowed`;
+    document.getElementById('sim-fail-label').textContent=`${d.blocked} blocked`;
+    document.getElementById('sim-rate-label').textContent=`${d.block_rate_pct}% block rate`;
+    const grid=document.getElementById('sim-grid');
+    grid.innerHTML=d.results.map(req=>`<div class="sim-cell ${req.allowed?'ok':'fail'}" title="req ${req.request_number}">${req.request_number}</div>`).join('');
+    d.results.forEach(req=>addLog({ts:ts(),allowed:req.allowed,algo:body.algorithm,client:body.client_id,rem:req.remaining}));
+  }catch{toast('Simulation failed','fail')}
+  btn.disabled=false; btn.textContent='Run simulation';
 });
 
-// ════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════
 // TOKEN BUCKET LIVE
-// ════════════════════════════════════════════════════════
-function syncTbConfig() {
-  S.tbCapacity = parseInt(document.getElementById('tb-capacity').value) || 10;
-  S.tbRefillRate = parseFloat(document.getElementById('tb-rate').value) || 1;
+// ═══════════════════════════════════════════════
+function getTbConfig(){
+  return{
+    cap:parseInt(document.getElementById('tb-cap').value)||10,
+    rate:parseFloat(document.getElementById('tb-rate').value)||1,
+    client:document.getElementById('tb-client').value.trim()||'bucket_live',
+  };
 }
 
-function renderBucket() {
-  syncTbConfig();
-  const tokens = Math.max(0, Math.min(S.tbCapacity, S.tbTokens));
-  const pct = tokens / S.tbCapacity;
-
-  // fill rect: y goes from 170 (empty) to 20 (full), height 150
-  const fillH = pct * 150;
-  const fillY = 170 - fillH;
-  const rect = document.getElementById('bucket-fill-rect');
-  rect.setAttribute('height', fillH);
-  rect.setAttribute('y', fillY);
-
-  // color based on fullness
-  let color = '#60a5fa';
-  if (pct <= 0.2) color = '#ef4444';
-  else if (pct <= 0.5) color = '#f59e0b';
-  rect.style.fill = color;
-
-  // token circles inside bucket (max 10 visible)
-  const visible = Math.min(10, Math.round(tokens));
-  const circles = document.getElementById('token-circles');
-  circles.innerHTML = '';
-  for (let i = 0; i < visible; i++) {
-    const row = Math.floor(i / 4);
-    const col = i % 4;
-    const cx = 28 + col * 18;
-    const cy = 155 - row * 22;
-    const c = document.createElementNS('http://www.w3.org/2000/svg','circle');
-    c.setAttribute('cx', cx);
-    c.setAttribute('cy', cy);
-    c.setAttribute('r', '7');
-    c.setAttribute('fill', color);
-    c.setAttribute('opacity', '0.7');
-    c.setAttribute('class', 'token-circle');
-    circles.appendChild(c);
+function renderBucket(){
+  const{cap}=getTbConfig();
+  const tokens=Math.max(0,Math.min(cap,S.tbTokens));
+  const pct=tokens/cap;
+  // fill
+  const fillH=pct*150;
+  const fillEl=document.getElementById('tb-fill');
+  fillEl.setAttribute('height',fillH);
+  fillEl.setAttribute('y',175-fillH);
+  const col=pct<=.2?'var(--red)':pct<=.5?'var(--amber)':'var(--blue)';
+  fillEl.style.fill=col;
+  // dots (max 10)
+  const dots=document.getElementById('tb-dots');
+  const vis=Math.min(10,Math.round(tokens));
+  dots.innerHTML='';
+  for(let i=0;i<vis;i++){
+    const row=Math.floor(i/4), col2=i%4;
+    const cx=22+col2*20, cy=158-row*24;
+    const c=document.createElementNS('http://www.w3.org/2000/svg','circle');
+    c.setAttribute('cx',cx); c.setAttribute('cy',cy); c.setAttribute('r','7');
+    c.setAttribute('fill',col); c.setAttribute('opacity','0.7');
+    dots.appendChild(c);
   }
-
-  document.getElementById('bucket-count-label').textContent = `${Math.floor(tokens)} / ${S.tbCapacity} tokens`;
-  document.getElementById('tb-tokens').textContent = Math.floor(tokens);
-  document.getElementById('tb-tokens').style.color = pct <= 0.2 ? 'var(--red)' : pct <= 0.5 ? 'var(--amber)' : 'var(--green)';
-  document.getElementById('tb-consumed').textContent = S.tbConsumed;
+  document.getElementById('tb-count-label').textContent=`${Math.floor(tokens)} / ${cap}`;
+  document.getElementById('tb-tok-val').textContent=Math.floor(tokens);
+  document.getElementById('tb-tok-val').style.color=pct<=.2?'var(--red)':pct<=.5?'var(--amber)':'var(--green)';
+  document.getElementById('tb-con-val').textContent=S.tbConsumed;
 }
 
-// Refill animation tick
-let tbRefillProgress = 0;
-setInterval(() => {
-  syncTbConfig();
-  if (S.tbTokens < S.tbCapacity) {
-    tbRefillProgress += S.tbRefillRate / 10; // 10 ticks per second
-    if (tbRefillProgress >= 1) {
-      S.tbTokens = Math.min(S.tbCapacity, S.tbTokens + 1);
-      tbRefillProgress = 0;
-      // trigger drip animation
-      const drip = document.getElementById('drip');
-      if (drip) {
-        drip.setAttribute('opacity', '1');
-        document.getElementById('drip-anim').beginElement();
-        document.getElementById('drip-fade').beginElement();
-        setTimeout(() => drip.setAttribute('opacity','0'), 600);
-      }
+// refill tick at 10hz
+setInterval(()=>{
+  const{cap,rate}=getTbConfig();
+  if(S.tbTokens<cap){
+    S.tbRefillProg+=rate/10;
+    if(S.tbRefillProg>=1){
+      S.tbTokens=Math.min(cap,S.tbTokens+1);
+      S.tbRefillProg=0;
+      // drip animation
+      const drip=document.getElementById('tb-drip');
+      drip.style.opacity='1';
+      setTimeout(()=>drip.style.opacity='0',400);
       renderBucket();
     }
-    const refillIn = ((1 - tbRefillProgress) / S.tbRefillRate).toFixed(1);
-    document.getElementById('tb-refill-bar').style.width = (tbRefillProgress * 100) + '%';
-    document.getElementById('tb-refill-label').textContent = `+1 token in ${refillIn}s`;
+    const refillIn=((1-S.tbRefillProg)/rate).toFixed(1);
+    document.getElementById('tb-rbar').style.width=(S.tbRefillProg*100)+'%';
+    document.getElementById('tb-rlabel').textContent=`+1 token in ${refillIn}s`;
   } else {
-    document.getElementById('tb-refill-bar').style.width = '100%';
-    document.getElementById('tb-refill-label').textContent = 'bucket full';
+    document.getElementById('tb-rbar').style.width='100%';
+    document.getElementById('tb-rlabel').textContent='bucket full';
   }
-}, 100);
+},100);
 
-async function fireTbRequest() {
-  syncTbConfig();
-  const client = document.getElementById('tb-client').value.trim() || 'bucket_demo';
-  try {
-    const r = await fetch(`/check/token_bucket?client_id=${encodeURIComponent(client)}&capacity=${S.tbCapacity}&refill_rate=${S.tbRefillRate}`);
-    const d = await r.json();
-    const allowed = r.ok;
-    if (allowed) {
-      S.tbTokens = Math.max(0, d.remaining);
-      S.tbConsumed++;
-    }
+async function fireTb(){
+  const{cap,rate,client}=getTbConfig();
+  try{
+    const r=await fetch(`/check/token_bucket?client_id=${encodeURIComponent(client)}&capacity=${cap}&refill_rate=${rate}`);
+    const d=await r.json(); const ok=r.ok;
+    if(ok){S.tbTokens=Math.max(0,d.remaining);S.tbConsumed++;}
     renderBucket();
-
-    const lastResult = document.getElementById('tb-last-result');
-    lastResult.style.color = allowed ? 'var(--green)' : 'var(--red)';
-    lastResult.textContent = allowed ? `✓ allowed — ${d.remaining} tokens left` : `✗ blocked — bucket empty`;
-
-    // add to tb log
-    const logEl = document.getElementById('tb-log');
-    const entry = document.createElement('div');
-    entry.className = `log-entry ${allowed?'ok':'fail'}`;
-    entry.innerHTML = `<span class="log-ts">${nowTs()}</span><span class="log-badge ${allowed?'ok':'fail'}">${allowed?'ALLOW':'BLOCK'}</span><span class="log-algo">token_bucket</span><span class="log-id">${client}</span><span class="log-rem">${d.remaining??0}</span>`;
-    if (logEl.querySelector('.log-empty')) logEl.innerHTML = '';
-    logEl.insertBefore(entry, logEl.firstChild);
-    if (logEl.children.length > 20) logEl.removeChild(logEl.lastChild);
-
-    addLog({ ts: nowTs(), allowed, algo: 'token_bucket', client, remaining: d.remaining ?? 0 });
-    if (!allowed) startCountdown(d.detail?.retry_after_seconds ?? Math.ceil(1/S.tbRefillRate));
-  } catch(e) {}
+    const lastEl=document.getElementById('tb-last');
+    lastEl.style.color=ok?'var(--green)':'var(--red)';
+    lastEl.textContent=ok?`✓ ${d.remaining} left`:`✗ empty`;
+    // tb log
+    const logEl=document.getElementById('tb-log');
+    const entry=document.createElement('div');
+    entry.className=`log-row ${ok?'ok':'fail'}`;
+    entry.innerHTML=`<span class="log-ts">${ts()}</span><span class="log-badge ${ok?'ok':'fail'}">${ok?'ALLOW':'BLOCK'}</span><span class="log-algo">token_bucket</span><span class="log-client">${client}</span><span class="log-rem">${d.remaining??0}</span>`;
+    if(logEl.querySelector('.log-empty'))logEl.innerHTML='';
+    logEl.insertBefore(entry,logEl.firstChild);
+    if(logEl.children.length>20)logEl.removeChild(logEl.lastChild);
+    addLog({ts:ts(),allowed:ok,algo:'token_bucket',client,rem:d.remaining??0});
+    if(!ok)startCd(d.detail?.retry_after_seconds??Math.ceil(1/rate),'token_bucket');
+    if(ok)_secAllowed++; else _secBlocked++;
+  }catch{}
 }
-
-document.getElementById('tb-fire-btn').addEventListener('click', fireTbRequest);
-
-document.getElementById('tb-reset-btn').addEventListener('click', async () => {
-  const client = document.getElementById('tb-client').value.trim() || 'bucket_demo';
+document.getElementById('tb-fire').addEventListener('click',fireTb);
+document.getElementById('tb-reset-btn').addEventListener('click',async()=>{
+  const{client,cap}=getTbConfig();
   await resetClient(client);
-  S.tbTokens = S.tbCapacity;
-  S.tbConsumed = 0;
-  tbRefillProgress = 0;
+  S.tbTokens=cap; S.tbConsumed=0; S.tbRefillProg=0;
   renderBucket();
-  document.getElementById('tb-log').innerHTML = '<div class="log-empty">Bucket reset</div>';
-  toast('Bucket reset', 'ok');
+  document.getElementById('tb-log').innerHTML='<div class="log-empty">Bucket reset</div>';
 });
-
-document.getElementById('tb-auto').addEventListener('change', function() {
-  if (this.checked) {
-    S.tbAutoTimer = setInterval(fireTbRequest, 500);
-  } else {
-    if (S.tbAutoTimer) { clearInterval(S.tbAutoTimer); S.tbAutoTimer = null; }
-  }
+document.getElementById('tb-auto').addEventListener('change',function(){
+  if(this.checked){S.tbAutoTimer=setInterval(fireTb,500);}
+  else{clearInterval(S.tbAutoTimer);S.tbAutoTimer=null;}
 });
-
-// Init bucket render
 renderBucket();
 
-// ════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════
 // ADMIN
-// ════════════════════════════════════════════════════════
-document.getElementById('admin-save-btn').addEventListener('click', () => {
-  S.adminKey = document.getElementById('admin-key').value.trim();
-  localStorage.setItem('rl_admin_key', S.adminKey);
-  document.getElementById('admin-key-status').textContent = S.adminKey ? '✓ key saved' : 'key cleared';
-  toast('Admin key saved', 'ok');
+// ═══════════════════════════════════════════════
+document.getElementById('admin-save').addEventListener('click',()=>{
+  S.adminKey=document.getElementById('admin-key').value.trim();
+  localStorage.setItem('rl_admin_key',S.adminKey);
+  document.getElementById('admin-status').textContent=S.adminKey?'✓ saved to localStorage':'cleared';
+  toast('Admin key saved');
+});
+document.getElementById('admin-reset').addEventListener('click',async()=>{
+  const c=document.getElementById('admin-client').value.trim();
+  if(!c){toast('Enter a client ID','fail');return;}
+  const d=await resetClient(c,true);
+  if(d)document.getElementById('admin-result').textContent=`✓ deleted ${d.keys_deleted} keys for "${c}"`;
 });
 
-document.getElementById('reset-btn').addEventListener('click', async () => {
-  const client = document.getElementById('reset-client').value.trim();
-  if (!client) { toast('Enter a client ID', 'fail'); return; }
-  const d = await resetClient(client, true);
-  if (d) document.getElementById('reset-result').textContent = `✓ deleted ${d.keys_deleted} keys for "${client}"`;
-});
-
-async function resetClient(clientId, verbose = false) {
-  try {
-    const r = await fetch(`/reset/${encodeURIComponent(clientId)}`, {
-      method: 'DELETE',
-      headers: S.adminKey ? { 'X-Admin-Key': S.adminKey } : {},
-    });
-    if (r.status === 403) { toast('Admin key required — set it in Admin tab', 'fail'); return null; }
-    const d = await r.json();
-    toast(`Reset ${clientId} — ${d.keys_deleted} keys deleted`, 'ok');
-    // reset gauge
-    S.gaugeUsed = 0;
-    updateGauge({ allowed: true, remaining: S.gaugeLimit });
+async function resetClient(clientId,verbose=false){
+  try{
+    const r=await fetch(`/reset/${encodeURIComponent(clientId)}`,{method:'DELETE',headers:S.adminKey?{'X-Admin-Key':S.adminKey}:{}});
+    if(r.status===403){toast('Admin key required — set in Admin tab','fail');return null;}
+    const d=await r.json();
+    toast(`Reset ${clientId} — ${d.keys_deleted} keys deleted`);
     return d;
-  } catch(e) { toast('Reset failed', 'fail'); return null; }
+  }catch{toast('Reset failed','fail');return null;}
 }
 
-// ════════════════════════════════════════════════════════
-// LOG CLEAR
-// ════════════════════════════════════════════════════════
-document.getElementById('log-clear-btn').addEventListener('click', () => {
-  S.log = []; S.stats = { allowed: 0, blocked: 0 };
-  updateStats();
-  renderLog('ov-log', []); renderLog('full-log', []);
-  document.getElementById('log-count').textContent = '(0)';
+// ═══════════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════════
+function setResult(id,type,html){
+  const el=document.getElementById(id);
+  el.className='result '+type;
+  el.innerHTML=html;
+}
+
+document.getElementById('log-clear').addEventListener('click',()=>{
+  S.log=[]; S.stats={allowed:0,blocked:0};
+  updateMetrics();
+  renderLog('ov-log',[]);
 });
+
+// Architecture arrow animation pulses green when autofire is on
+setInterval(()=>{
+  const on=!!S.afTimer||!!S.tbAutoTimer;
+  ['arch-l1','arch-l2','arch-l3'].forEach(id=>{
+    document.getElementById(id)?.classList.toggle('animated',on);
+  });
+  const res=document.getElementById('arch-response');
+  if(res&&on){
+    const lastOk=S.log[0]?.allowed;
+    if(lastOk===true)res.style.borderColor='rgba(0,255,136,.5)';
+    else if(lastOk===false)res.style.borderColor='rgba(255,68,102,.5)';
+  }
+},500);
 </script>
 </body>
 </html>
