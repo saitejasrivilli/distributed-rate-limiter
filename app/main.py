@@ -1,12 +1,15 @@
 import uuid
 import time
+import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request, HTTPException, Security, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse, FileResponse
 from fastapi.security.api_key import APIKeyHeader
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.limiter import RateLimiter
@@ -164,11 +167,19 @@ app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RequestSizeLimitMiddleware)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],       # open for recruiter demo; restrict to your domain in prod
+    allow_origins=["*"],
     allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["Content-Type", "X-Admin-Key"],
     expose_headers=["X-Request-ID", "Retry-After", "X-RateLimit-Remaining"],
 )
+
+# ---------------------------------------------------------------------------
+# Static UI
+# ---------------------------------------------------------------------------
+from pathlib import Path as _Path
+_static_dir = _Path(__file__).parent.parent / "static"
+if _static_dir.exists():
+    app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 
 # ---------------------------------------------------------------------------
 # Auth dependency — admin endpoints only
@@ -198,8 +209,18 @@ def rl_headers(result: RateLimitResponse) -> dict:
 # Routes
 # ---------------------------------------------------------------------------
 
-@app.get("/", response_model=StatusResponse, tags=["Health"])
-async def root():
+@app.get("/", response_class=HTMLResponse, include_in_schema=False)
+async def ui():
+    """Serve the dashboard UI."""
+    from pathlib import Path
+    ui_file = Path(__file__).parent.parent / "static" / "index.html"
+    if ui_file.exists():
+        return HTMLResponse(content=ui_file.read_text())
+    return HTMLResponse(content="<p>UI not found. Visit <a href='/docs'>/docs</a></p>")
+
+
+@app.get("/health", response_model=StatusResponse, tags=["Health"])
+async def health():
     """Health check — confirms Redis connection is alive."""
     redis_ok = await limiter.ping()
     return StatusResponse(
