@@ -283,6 +283,7 @@ body::before{content:'';position:fixed;inset:0;background-image:url("data:image/
     <button class="tab-btn" data-page="test">test</button>
     <button class="tab-btn" data-page="simulate">simulate</button>
     <button class="tab-btn" data-page="bucket">token bucket</button>
+    <button class="tab-btn" data-page="leaky">leaky bucket</button>
     <button class="tab-btn" data-page="algorithms">algorithms</button>
     <button class="tab-btn" data-page="admin">admin</button>
   </div>
@@ -298,7 +299,7 @@ body::before{content:'';position:fixed;inset:0;background-image:url("data:image/
   <div class="sidebar-logo-area">
     <div style="font-size:10px;color:var(--dim);letter-spacing:.06em;text-transform:uppercase">Distributed</div>
     <div style="font-family:var(--display);font-size:18px;font-weight:800;color:var(--text);line-height:1.2;margin-top:2px">Rate<br>Limiter</div>
-    <div class="sidebar-tagline">Production-grade · Redis-backed<br>3 algorithms · Atomic Lua scripts</div>
+    <div class="sidebar-tagline">Production-grade · Redis-backed<br>4 algorithms · Circuit breaker · Prometheus</div>
   </div>
 
   <div class="nav-section">Monitor</div>
@@ -308,6 +309,7 @@ body::before{content:'';position:fixed;inset:0;background-image:url("data:image/
   <div class="nav-section">Experiment</div>
   <div class="nav-item" data-page="simulate"><div class="nav-dot"></div><span class="nav-label">Burst simulator</span></div>
   <div class="nav-item" data-page="bucket"><div class="nav-dot"></div><span class="nav-label">Token bucket live</span></div>
+  <div class="nav-item" data-page="leaky"><div class="nav-dot"></div><span class="nav-label">Leaky bucket live</span><span class="nav-badge">NEW</span></div>
 
   <div class="nav-section">Reference</div>
   <div class="nav-item" data-page="algorithms"><div class="nav-dot"></div><span class="nav-label">Algorithms</span></div>
@@ -332,10 +334,12 @@ body::before{content:'';position:fixed;inset:0;background-image:url("data:image/
       <span class="pill green">● Sliding window</span>
       <span class="pill blue">● Fixed window</span>
       <span class="pill amber">● Token bucket</span>
-      <span class="pill purple">● Atomic Lua scripts</span>
+      <span class="pill purple">● Leaky bucket</span>
+      <span class="pill green">● Atomic Lua scripts</span>
+      <span class="pill amber">● Circuit breaker</span>
+      <span class="pill blue">● Prometheus /metrics</span>
       <span class="pill">HMAC-secured admin</span>
       <span class="pill">Self-protected</span>
-      <span class="pill">TTL-based cleanup</span>
     </div>
     <!-- Architecture diagram -->
     <div class="arch">
@@ -346,19 +350,25 @@ body::before{content:'';position:fixed;inset:0;background-image:url("data:image/
       <div class="arch-arrow"><div class="arch-line animated" id="arch-l1"></div><div class="arch-arrow-label">req</div></div>
       <div class="arch-node">
         <div class="arch-box highlight">FastAPI</div>
-        <div class="arch-sub">Render · Python</div>
+        <div class="arch-sub">Python · /metrics</div>
       </div>
-      <div class="arch-arrow"><div class="arch-line" id="arch-l2"></div><div class="arch-arrow-label">Lua</div></div>
+      <div class="arch-arrow"><div class="arch-line" id="arch-l2"></div><div class="arch-arrow-label">wrap</div></div>
+      <div class="arch-node">
+        <div class="arch-box amber" id="arch-cb">Circuit Breaker</div>
+        <div class="arch-sub">CLOSED/OPEN/HALF</div>
+      </div>
+      <div class="arch-arrow"><div class="arch-line" id="arch-l3"></div><div class="arch-arrow-label">Lua</div></div>
       <div class="arch-node">
         <div class="arch-box blue">Upstash Redis</div>
         <div class="arch-sub">ZSET / STR / HASH</div>
       </div>
-      <div class="arch-arrow"><div class="arch-line" id="arch-l3"></div><div class="arch-arrow-label">result</div></div>
+      <div class="arch-arrow"><div class="arch-line" id="arch-l4"></div><div class="arch-arrow-label">result</div></div>
       <div class="arch-node">
-        <div class="arch-box amber" id="arch-response">200 / 429</div>
-        <div class="arch-sub">+ Retry-After header</div>
+        <div class="arch-box" id="arch-response">200 / 429</div>
+        <div class="arch-sub">+ Retry-After</div>
       </div>
     </div>
+    <div style="font-size:9px;color:var(--dim);margin-top:6px">↑ fallback: in-memory token bucket when Redis is down (OPEN state)</div>
   </div>
 
   <div class="content">
@@ -443,7 +453,7 @@ body::before{content:'';position:fixed;inset:0;background-image:url("data:image/
     <div style="font-family:var(--display);font-size:24px;font-weight:700;margin-bottom:6px">Check limit</div>
     <div style="font-size:12px;color:var(--muted);margin-bottom:24px">Test any algorithm live against Upstash Redis</div>
 
-    <div class="algo-grid" id="algo-selector">
+    <div class="algo-grid" id="algo-selector" style="grid-template-columns:repeat(4,1fr)">
       <div class="algo-card sel" data-algo="sliding_window">
         <div class="algo-card-check">✓</div>
         <div class="algo-name">sliding_window</div>
@@ -461,6 +471,12 @@ body::before{content:'';position:fixed;inset:0;background-image:url("data:image/
         <div class="algo-name">token_bucket</div>
         <div class="algo-desc">Continuous token refill. Allows controlled bursting.</div>
         <div><span class="algo-badge" style="border-color:rgba(255,176,32,.3);color:var(--amber)">HASH</span> <span class="algo-badge">O(1)</span></div>
+      </div>
+      <div class="algo-card" data-algo="leaky_bucket">
+        <div class="algo-card-check">✓</div>
+        <div class="algo-name">leaky_bucket</div>
+        <div class="algo-desc">Constant output rate. Queue fills then rejects — no burst absorption.</div>
+        <div><span class="algo-badge" style="border-color:rgba(168,85,247,.3);color:var(--purple)">HASH</span> <span class="algo-badge">O(1)</span></div>
       </div>
     </div>
 
@@ -502,6 +518,7 @@ body::before{content:'';position:fixed;inset:0;background-image:url("data:image/
               <option value="sliding_window">sliding_window</option>
               <option value="fixed_window">fixed_window</option>
               <option value="token_bucket">token_bucket</option>
+              <option value="leaky_bucket">leaky_bucket</option>
             </select>
           </div>
           <div class="form-group"><label class="form-label">Client ID</label><input class="inp" id="sim-client" value="burst_test"></div>
@@ -613,6 +630,69 @@ body::before{content:'';position:fixed;inset:0;background-image:url("data:image/
   </div>
 </div>
 
+<!-- ════════ LEAKY BUCKET LIVE ════════ -->
+<div class="page" id="page-leaky">
+  <div class="content" style="padding-top:32px">
+    <div style="font-family:var(--display);font-size:24px;font-weight:700;margin-bottom:6px">Leaky bucket — live</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:24px">Watch the queue fill and drain at a constant rate against the actual Redis backend</div>
+
+    <div class="card">
+      <div class="card-header"><span class="card-title">Configuration</span></div>
+      <div class="card-body">
+        <div class="form-row three" style="margin-bottom:12px">
+          <div class="form-group"><label class="form-label">Client ID</label><input class="inp" id="lk-client" value="leaky_live"></div>
+          <div class="form-group"><label class="form-label">Capacity (queue size)</label><input class="inp" id="lk-cap" type="number" value="10" min="1" max="50"></div>
+          <div class="form-group"><label class="form-label">Leak rate (per s)</label><input class="inp" id="lk-rate" type="number" value="1" step="0.5" min="0.1" max="10"></div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <button class="btn btn-primary" id="lk-fire">Add to queue</button>
+          <button class="btn btn-ghost" id="lk-reset-btn">Reset queue</button>
+          <label class="toggle" style="margin-left:4px"><input type="checkbox" id="lk-auto"><div class="t-track"></div><div class="t-thumb"></div></label>
+          <span style="font-size:11px;color:var(--muted)">auto (2/s)</span>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:160px 1fr;gap:24px;align-items:start;margin-bottom:20px">
+      <!-- SVG Queue visualization -->
+      <div style="background:var(--s1);border:1px solid var(--border);padding:20px;display:flex;flex-direction:column;align-items:center">
+        <div style="font-size:9px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin-bottom:12px">Queue state</div>
+        <svg width="120" height="200" viewBox="0 0 120 200" style="overflow:visible">
+          <defs><clipPath id="lkclip"><rect x="10" y="25" width="100" height="150"/></clipPath></defs>
+          <rect id="lk-fill" x="10" y="175" width="100" height="0" clip-path="url(#lkclip)" fill="var(--purple)" opacity="0.25" style="transition:height .5s ease,y .5s ease"/>
+          <rect x="10" y="25" width="100" height="150" fill="none" stroke="var(--border2)" stroke-width="1.5"/>
+          <!-- drain arrow at bottom -->
+          <line x1="60" y1="175" x2="60" y2="195" stroke="var(--purple)" stroke-width="2" stroke-dasharray="3,2" id="lk-drain-line"/>
+          <text x="60" y="200" text-anchor="middle" font-family="var(--mono)" font-size="8" fill="var(--dim)" id="lk-drain-label">draining</text>
+          <text id="lk-count-label" x="60" y="192" text-anchor="middle" font-family="var(--mono)" font-size="9" fill="var(--dim)" dy="-20">0 / 10</text>
+        </svg>
+      </div>
+
+      <!-- Stats -->
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+          <div style="background:var(--s1);border:1px solid var(--border);padding:14px">
+            <div style="font-size:9px;color:var(--dim);letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px">Queue</div>
+            <div style="font-family:var(--display);font-size:28px;font-weight:700;color:var(--purple);transition:color .3s" id="lk-q-val">0</div>
+          </div>
+          <div style="background:var(--s1);border:1px solid var(--border);padding:14px">
+            <div style="font-size:9px;color:var(--dim);letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px">Accepted</div>
+            <div style="font-family:var(--display);font-size:28px;font-weight:700;color:var(--muted)" id="lk-acc-val">0</div>
+          </div>
+          <div style="background:var(--s1);border:1px solid var(--border);padding:14px">
+            <div style="font-size:9px;color:var(--dim);letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px">Last</div>
+            <div style="font-size:13px;font-weight:500;transition:color .3s;margin-top:4px" id="lk-last">—</div>
+          </div>
+        </div>
+        <div class="log-wrap" style="flex:1">
+          <div class="log-header"><span class="section-title">Queue events</span></div>
+          <div class="log-list" id="lk-log" style="max-height:220px"><div class="log-empty">Fire a request</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ════════ ALGORITHMS ════════ -->
 <div class="page" id="page-algorithms">
   <div class="content" style="padding-top:32px">
@@ -673,6 +753,29 @@ tokens = min(capacity, tokens + elapsed × rate)<br>
 &nbsp;&nbsp;<span class="c-kw">return</span> allow<br>
 <span class="c-cm">-- O(1) memory regardless of request volume</span></div>
         <div class="tag-row"><span class="tag">burst tolerance</span><span class="tag">smooth refill</span><span class="tag">O(1) per client</span><span class="tag">no background worker</span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">leaky_bucket</span>
+        <div style="display:flex;gap:6px"><span class="algo-badge" style="border-color:rgba(168,85,247,.3);color:var(--purple)">HASH</span><span class="algo-badge">O(1)</span><span class="algo-badge">constant rate</span><span class="algo-badge">NEW</span></div>
+      </div>
+      <div class="card-body">
+        <p style="font-size:12px;color:var(--muted);line-height:1.8;margin-bottom:14px">Stores <code style="color:var(--blue)">queue_size</code> and <code style="color:var(--blue)">last_leak_ms</code> in a Redis Hash. On every request, the Lua script drains items that have leaked since the last call, then adds the new item if the queue is not full. Unlike token bucket, bursts are queued not absorbed — the output rate is strictly constant.</p>
+        <div class="code-block"><span class="c-cm">-- Drain items leaked since last call</span><br>
+elapsed = (now_ms - last_leak_ms) / <span class="c-num">1000.0</span><br>
+leaked  = floor(elapsed × leak_rate)<br>
+queue   = max(<span class="c-num">0</span>, queue - leaked)<br>
+<br>
+<span class="c-kw">if</span> queue &lt; capacity:<br>
+&nbsp;&nbsp;queue += <span class="c-num">1</span><br>
+&nbsp;&nbsp;<span class="c-fn">HMSET</span> key queue_size {queue} last_leak_ms {adjusted_ts}<br>
+&nbsp;&nbsp;<span class="c-kw">return</span> {<span class="c-num">1</span>, capacity - queue, <span class="c-num">0</span>}<br>
+<span class="c-kw">else</span>:<br>
+&nbsp;&nbsp;<span class="c-kw">return</span> {<span class="c-num">0</span>, <span class="c-num">0</span>, ceil(<span class="c-num">1</span> / leak_rate)}<br>
+<span class="c-cm">-- strictly constant output, no burst absorption</span></div>
+        <div class="tag-row"><span class="tag">constant output rate</span><span class="tag">smooths bursts</span><span class="tag">O(1) memory</span><span class="tag">no background worker</span><span class="tag">queue model</span></div>
       </div>
     </div>
   </div>
@@ -938,8 +1041,12 @@ document.querySelectorAll('.algo-card').forEach(c=>{
   c.addEventListener('click',()=>{
     document.querySelectorAll('.algo-card').forEach(x=>x.classList.remove('sel'));
     c.classList.add('sel'); selAlgo=c.dataset.algo;
-    document.getElementById('sw-fw-params').style.display=selAlgo==='token_bucket'?'none':'grid';
-    document.getElementById('tb-params').style.display=selAlgo==='token_bucket'?'grid':'none';
+    const useBucket=selAlgo==='token_bucket'||selAlgo==='leaky_bucket';
+    document.getElementById('sw-fw-params').style.display=useBucket?'none':'grid';
+    document.getElementById('tb-params').style.display=useBucket?'grid':'none';
+    // Update refill label for leaky_bucket
+    const refillLabel=document.querySelector('#tb-params .form-group:last-child .form-label');
+    if(refillLabel) refillLabel.textContent=selAlgo==='leaky_bucket'?'Leak rate (per s)':'Refill (per s)';
   });
 });
 
@@ -950,11 +1057,14 @@ document.getElementById('ch-btn').addEventListener('click',async()=>{
   if(selAlgo==='token_bucket'){
     const c=document.getElementById('ch-tb-client').value.trim()||'test_user';
     url=`/check/token_bucket?client_id=${encodeURIComponent(c)}&capacity=${document.getElementById('ch-capacity').value}&refill_rate=${document.getElementById('ch-refill').value}`;
+  } else if(selAlgo==='leaky_bucket'){
+    const c=document.getElementById('ch-tb-client').value.trim()||'test_user';
+    url=`/check/leaky_bucket?client_id=${encodeURIComponent(c)}&capacity=${document.getElementById('ch-capacity').value}&leak_rate=${document.getElementById('ch-refill').value}`;
   } else {
     const c=document.getElementById('ch-client').value.trim()||'test_user';
     url=`/check/${selAlgo}?client_id=${encodeURIComponent(c)}&limit=${document.getElementById('ch-limit').value}&window_seconds=${document.getElementById('ch-window').value}`;
   }
-  const client=selAlgo==='token_bucket'?document.getElementById('ch-tb-client').value.trim():document.getElementById('ch-client').value.trim();
+  const client=(selAlgo==='token_bucket'||selAlgo==='leaky_bucket')?document.getElementById('ch-tb-client').value.trim():document.getElementById('ch-client').value.trim();
   try{
     const r=await fetch(url); const d=await r.json(); const ok=r.ok;
     if(ok){
@@ -1150,10 +1260,78 @@ document.getElementById('log-clear').addEventListener('click',()=>{
   renderLog('ov-log',[]);
 });
 
+// ═══════════════════════════════════════════════
+// LEAKY BUCKET LIVE
+// ═══════════════════════════════════════════════
+let lkAccepted=0, lkAutoTimer=null;
+
+function getLkConfig(){
+  return{
+    cap:parseInt(document.getElementById('lk-cap').value)||10,
+    rate:parseFloat(document.getElementById('lk-rate').value)||1,
+    client:document.getElementById('lk-client').value.trim()||'leaky_live',
+  };
+}
+
+function renderLeaky(queueSize, cap){
+  const pct=Math.min(1,queueSize/cap);
+  const fillH=pct*150;
+  const fillEl=document.getElementById('lk-fill');
+  if(fillEl){
+    fillEl.setAttribute('height',fillH);
+    fillEl.setAttribute('y',175-fillH);
+    const col=pct>=.9?'var(--red)':pct>=.6?'var(--amber)':'var(--purple)';
+    fillEl.style.fill=col;
+    document.getElementById('lk-count-label').textContent=`${queueSize} / ${cap}`;
+    document.getElementById('lk-q-val').textContent=queueSize;
+    document.getElementById('lk-q-val').style.color=pct>=.9?'var(--red)':pct>=.6?'var(--amber)':'var(--purple)';
+  }
+  document.getElementById('lk-acc-val').textContent=lkAccepted;
+}
+
+async function fireLk(){
+  const{cap,rate,client}=getLkConfig();
+  try{
+    const r=await fetch(`/check/leaky_bucket?client_id=${encodeURIComponent(client)}&capacity=${cap}&leak_rate=${rate}`);
+    const d=await r.json(); const ok=r.ok;
+    if(ok){lkAccepted++;}
+    const queueUsed=ok?(cap-d.remaining):cap;
+    renderLeaky(queueUsed,cap);
+    const lastEl=document.getElementById('lk-last');
+    lastEl.style.color=ok?'var(--green)':'var(--red)';
+    lastEl.textContent=ok?`✓ ${d.remaining} slots free`:`✗ queue full`;
+    const logEl=document.getElementById('lk-log');
+    const entry=document.createElement('div');
+    entry.className=`log-row ${ok?'ok':'fail'}`;
+    entry.innerHTML=`<span class="log-ts">${ts()}</span><span class="log-badge ${ok?'ok':'fail'}">${ok?'ALLOW':'BLOCK'}</span><span class="log-algo">leaky_bucket</span><span class="log-client">${client}</span><span class="log-rem">${d.remaining??0}</span>`;
+    if(logEl.querySelector('.log-empty'))logEl.innerHTML='';
+    logEl.insertBefore(entry,logEl.firstChild);
+    if(logEl.children.length>20)logEl.removeChild(logEl.lastChild);
+    addLog({ts:ts(),allowed:ok,algo:'leaky_bucket',client,rem:d.remaining??0});
+    if(!ok)startCd(d.detail?.retry_after_seconds??Math.ceil(1/rate),'leaky_bucket');
+    if(ok)_secAllowed++; else _secBlocked++;
+  }catch{}
+}
+
+document.getElementById('lk-fire')?.addEventListener('click',fireLk);
+document.getElementById('lk-reset-btn')?.addEventListener('click',async()=>{
+  const{client,cap}=getLkConfig();
+  await resetClient(client);
+  lkAccepted=0;
+  renderLeaky(0,cap);
+  document.getElementById('lk-log').innerHTML='<div class="log-empty">Queue reset</div>';
+});
+document.getElementById('lk-auto')?.addEventListener('change',function(){
+  if(this.checked){lkAutoTimer=setInterval(fireLk,500);}
+  else{clearInterval(lkAutoTimer);lkAutoTimer=null;}
+});
+
+// ═══════════════════════════════════════════════
 // Architecture arrow animation pulses green when autofire is on
+// ═══════════════════════════════════════════════
 setInterval(()=>{
-  const on=!!S.afTimer||!!S.tbAutoTimer;
-  ['arch-l1','arch-l2','arch-l3'].forEach(id=>{
+  const on=!!S.afTimer||!!S.tbAutoTimer||!!lkAutoTimer;
+  ['arch-l1','arch-l2','arch-l3','arch-l4'].forEach(id=>{
     document.getElementById(id)?.classList.toggle('animated',on);
   });
   const res=document.getElementById('arch-response');
