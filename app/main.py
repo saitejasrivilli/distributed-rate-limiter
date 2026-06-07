@@ -11,6 +11,8 @@ from fastapi.responses import JSONResponse, HTMLResponse, FileResponse
 from fastapi.security.api_key import APIKeyHeader
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
+from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
+from starlette.responses import Response as StarletteResponse
 
 from app.limiter import RateLimiter
 from app.models import (
@@ -20,7 +22,7 @@ from app.models import (
 )
 from app.validators import (
     validate_client_id, validate_limit,
-    validate_window, validate_capacity, validate_refill_rate,
+    validate_window, validate_capacity, validate_refill_rate, validate_leak_rate,
 )
 from app.config import (
     SELF_PROTECT_LIMIT, SELF_PROTECT_WINDOW,
@@ -28,6 +30,30 @@ from app.config import (
     get_admin_key,
 )
 from app.logging_config import logger
+from app.circuit_breaker import circuit_breaker
+
+# ---------------------------------------------------------------------------
+# Prometheus metrics
+# ---------------------------------------------------------------------------
+
+RATE_LIMIT_HITS = Counter(
+    "rate_limit_hits_total",
+    "Total number of rate limit checks (allowed requests)",
+    ["algorithm"],
+)
+
+RATE_LIMIT_REJECTIONS = Counter(
+    "rate_limit_rejections_total",
+    "Total number of rate limit rejections (429 responses)",
+    ["algorithm"],
+)
+
+REDIS_OPERATION_DURATION = Histogram(
+    "redis_operation_duration_seconds",
+    "Time spent executing Redis Lua scripts",
+    ["algorithm"],
+    buckets=[0.001, 0.002, 0.005, 0.010, 0.025, 0.050, 0.100, 0.250, 0.500, 1.0],
+)
 
 # ---------------------------------------------------------------------------
 # App state
@@ -63,13 +89,14 @@ app = FastAPI(
     description="""
 ## Distributed Rate Limiter — Live Demo
 
-A production-grade rate limiter backed by **Upstash Redis**, supporting three algorithms:
+A production-grade rate limiter backed by **Upstash Redis**, supporting four algorithms:
 
 | Algorithm | Best For |
 |---|---|
 | **Sliding Window** | Smoothest limiting, no burst at window edge |
 | **Fixed Window** | Simple, lowest latency |
 | **Token Bucket** | Allows controlled bursts |
+| **Leaky Bucket** | Enforces a constant output rate |
 
 ### How to test
 1. Pick an algorithm under **Rate Limit — Check**
@@ -77,12 +104,16 @@ A production-grade rate limiter backed by **Upstash Redis**, supporting three al
 3. Watch `remaining` count down; see `retry_after` when blocked
 4. Use **POST /simulate** to fire N requests and see the full breakdown
 
+### Observability
+- Prometheus metrics at `/metrics`
+- Circuit breaker state in `/health`
+
 ### Security
 - `/reset/{client_id}` requires `X-Admin-Key` header
 - All inputs are validated server-side; caller-supplied `limit` values are capped
 - The API rate-limits itself against flooding
     """,
-    version="2.0.0",
+    version="3.0.0",
     lifespan=lifespan,
     # Never expose internal errors to clients
     responses={
@@ -219,15 +250,24 @@ async def ui():
     return HTMLResponse(content="<p>UI not found. Visit <a href='/docs'>/docs</a></p>")
 
 
+@app.get("/metrics", include_in_schema=False, tags=["Observability"])
+async def metrics():
+    """Prometheus metrics endpoint."""
+    data = generate_latest()
+    return StarletteResponse(content=data, media_type=CONTENT_TYPE_LATEST)
+
+
 @app.get("/health", response_model=StatusResponse, tags=["Health"])
 async def health():
-    """Health check — confirms Redis connection is alive."""
+    """Health check — confirms Redis connection is alive and reports circuit breaker state."""
     redis_ok = await limiter.ping()
+    cb_state = circuit_breaker.state.value
     return StatusResponse(
         status="ok" if redis_ok else "degraded",
         redis_connected=redis_ok,
-        algorithms_available=["sliding_window", "fixed_window", "token_bucket"],
-        message="Rate limiter is running. Visit /docs to test interactively."
+        algorithms_available=["sliding_window", "fixed_window", "token_bucket", "leaky_bucket"],
+        message="Rate limiter is running. Visit /docs to test interactively.",
+        circuit_breaker_state=cb_state,
     )
 
 
@@ -267,7 +307,14 @@ async def check_sliding_window(
             }
         )
 
+    t0 = time.perf_counter()
     result = await limiter.sliding_window(cid, lim, win)
+    REDIS_OPERATION_DURATION.labels(algorithm="sliding_window").observe(time.perf_counter() - t0)
+
+    if result.allowed:
+        RATE_LIMIT_HITS.labels(algorithm="sliding_window").inc()
+    else:
+        RATE_LIMIT_REJECTIONS.labels(algorithm="sliding_window").inc()
 
     if not result.allowed:
         raise HTTPException(
@@ -318,7 +365,14 @@ async def check_fixed_window(
             }
         )
 
+    t0 = time.perf_counter()
     result = await limiter.fixed_window(cid, lim, win)
+    REDIS_OPERATION_DURATION.labels(algorithm="fixed_window").observe(time.perf_counter() - t0)
+
+    if result.allowed:
+        RATE_LIMIT_HITS.labels(algorithm="fixed_window").inc()
+    else:
+        RATE_LIMIT_REJECTIONS.labels(algorithm="fixed_window").inc()
 
     if not result.allowed:
         raise HTTPException(
@@ -369,7 +423,14 @@ async def check_token_bucket(
             }
         )
 
+    t0 = time.perf_counter()
     result = await limiter.token_bucket(cid, cap, rate)
+    REDIS_OPERATION_DURATION.labels(algorithm="token_bucket").observe(time.perf_counter() - t0)
+
+    if result.allowed:
+        RATE_LIMIT_HITS.labels(algorithm="token_bucket").inc()
+    else:
+        RATE_LIMIT_REJECTIONS.labels(algorithm="token_bucket").inc()
 
     if not result.allowed:
         raise HTTPException(
@@ -379,6 +440,67 @@ async def check_token_bucket(
                 "algorithm": "token_bucket",
                 "retry_after_seconds": result.retry_after,
                 "tokens_remaining": result.remaining,
+                "capacity": cap,
+                "request_id": request.state.request_id,
+            }
+        )
+
+    from fastapi.responses import JSONResponse as JR
+    return JR(content=result.model_dump(), headers=rl_headers(result))
+
+
+@app.get(
+    "/check/leaky_bucket",
+    response_model=RateLimitResponse,
+    tags=["Rate Limit — Check"],
+    summary="Leaky Bucket (constant output rate)",
+)
+async def check_leaky_bucket(
+    request: Request,
+    client_id: str = "demo_user",
+    capacity: int = 10,
+    leak_rate: float = 1.0,
+):
+    """
+    **Leaky Bucket** — enforces a constant output rate regardless of burst.
+
+    The queue drains at `leak_rate` items/sec. If the queue is full, the request
+    is rejected. Unlike token bucket, burst traffic is *smoothed* rather than
+    absorbed — the output rate stays constant.
+
+    Try it: fire many requests quickly to fill the queue, then watch them drain.
+    """
+    cid = validate_client_id(client_id)
+    cap = validate_capacity(capacity)
+    rate = validate_leak_rate(leak_rate)
+
+    allowed = await limiter.self_protect("check", SELF_PROTECT_LIMIT, SELF_PROTECT_WINDOW)
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "service_overloaded",
+                "retry_after_seconds": SELF_PROTECT_WINDOW,
+            }
+        )
+
+    t0 = time.perf_counter()
+    result = await limiter.leaky_bucket(cid, cap, rate)
+    REDIS_OPERATION_DURATION.labels(algorithm="leaky_bucket").observe(time.perf_counter() - t0)
+
+    if result.allowed:
+        RATE_LIMIT_HITS.labels(algorithm="leaky_bucket").inc()
+    else:
+        RATE_LIMIT_REJECTIONS.labels(algorithm="leaky_bucket").inc()
+
+    if not result.allowed:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "rate_limit_exceeded",
+                "algorithm": "leaky_bucket",
+                "retry_after_seconds": result.retry_after,
+                "queue_remaining": result.remaining,
                 "capacity": cap,
                 "request_id": request.state.request_id,
             }
@@ -426,6 +548,8 @@ async def simulate(request: Request, req: SimulateRequest):
             r = await limiter.sliding_window(cid, req.limit, req.window_seconds)
         elif req.algorithm == AlgorithmType.fixed_window:
             r = await limiter.fixed_window(cid, req.limit, req.window_seconds)
+        elif req.algorithm == AlgorithmType.leaky_bucket:
+            r = await limiter.leaky_bucket(cid, req.capacity, req.refill_rate)
         else:
             r = await limiter.token_bucket(cid, req.capacity, req.refill_rate)
 
