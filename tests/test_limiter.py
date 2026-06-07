@@ -13,13 +13,13 @@ import asyncio
 import time
 import pytest
 import pytest_asyncio
-import fakeredis.aioredis as fakeredis
-from unittest.mock import AsyncMock, patch, MagicMock
+import fakeredis
+import fakeredis.aioredis
 from httpx import AsyncClient, ASGITransport
 
 from app.main import app
 from app.limiter import RateLimiter
-from app.circuit_breaker import CircuitBreaker, InMemoryTokenBucket, State, RedisCircuitOpen
+from app.circuit_breaker import CircuitBreaker, InMemoryTokenBucket, State
 
 
 # ---------------------------------------------------------------------------
@@ -35,7 +35,7 @@ def event_loop_policy():
 async def fake_redis():
     """Provides a fakeredis instance that mimics the real redis-py async client."""
     server = fakeredis.FakeServer()
-    client = fakeredis.FakeRedis(server=server, decode_responses=True)
+    client = fakeredis.aioredis.FakeRedis(server=server, decode_responses=True)
     yield client
     await client.aclose()
 
@@ -381,10 +381,6 @@ def test_in_memory_token_bucket_thread_safety():
     for t in threads:
         t.join()
 
-    allowed_count = sum(1 for r in results if r)
-    # With capacity=10 and 200 total calls, exactly 10 should be initially allowed
-    # (subsequent ones may be allowed too as refill_rate is high).
-    # The important invariant is that we got exactly 200 results without errors.
     assert len(results) == 200
 
 

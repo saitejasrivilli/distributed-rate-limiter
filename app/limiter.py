@@ -2,7 +2,6 @@ import redis.asyncio as redis
 from redis.asyncio import ConnectionPool
 import time
 import os
-import asyncio
 from app.models import RateLimitResponse
 from app.config import (
     REDIS_CONNECT_TIMEOUT, REDIS_SOCKET_TIMEOUT,

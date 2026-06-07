@@ -14,7 +14,6 @@ Expected results at 500 concurrent users:
 """
 
 import random
-import string
 from locust import HttpUser, TaskSet, task, between, constant_throughput
 
 

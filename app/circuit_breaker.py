@@ -186,7 +186,7 @@ class CircuitBreaker:
             result = await coro_fn(*args, **kwargs)
             self.record_success()
             return result
-        except Exception as exc:
+        except Exception:
             self.record_failure()
             raise
 

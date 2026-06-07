@@ -1,13 +1,11 @@
 import uuid
 import time
-import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request, HTTPException, Security, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.responses import JSONResponse, HTMLResponse, FileResponse
+from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.security.api_key import APIKeyHeader
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -67,16 +65,18 @@ async def lifespan(app: FastAPI):
     limiter = RateLimiter()
     try:
         await limiter.connect()
-        key = get_admin_key()
-        from app.config import ADMIN_API_KEY
-        if not ADMIN_API_KEY:
-            logger.warning(
-                "ADMIN_API_KEY not set — generated ephemeral key for this session",
-                extra={"generated_admin_key": key}
-            )
     except Exception as exc:
-        logger.error("Failed to connect to Redis at startup", extra={"exc_msg": str(exc)})
-        raise
+        logger.warning(
+            "Redis unavailable at startup — running in degraded mode (circuit breaker active)",
+            extra={"exc_msg": str(exc)},
+        )
+    key = get_admin_key()
+    from app.config import ADMIN_API_KEY
+    if not ADMIN_API_KEY:
+        logger.warning(
+            "ADMIN_API_KEY not set — generated ephemeral key for this session",
+            extra={"generated_admin_key": key},
+        )
     yield
     await limiter.close()
 
@@ -207,8 +207,7 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 # Static UI
 # ---------------------------------------------------------------------------
-from pathlib import Path as _Path
-_static_dir = _Path(__file__).parent.parent / "static"
+_static_dir = Path(__file__).parent.parent / "static"
 if _static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 
@@ -243,7 +242,6 @@ def rl_headers(result: RateLimitResponse) -> dict:
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 async def ui():
     """Serve the dashboard UI."""
-    from pathlib import Path
     ui_file = Path(__file__).parent.parent / "static" / "index.html"
     if ui_file.exists():
         return HTMLResponse(content=ui_file.read_text())
