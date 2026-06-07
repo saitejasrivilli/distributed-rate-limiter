@@ -90,6 +90,7 @@ end
 
 local elapsed_sec = (now_ms - last_refill) / 1000.0
 if elapsed_sec < 0 then elapsed_sec = 0 end
+elapsed_sec = math.min(elapsed_sec, capacity / refill_rate)
 
 local new_tokens = math.min(capacity, tokens + elapsed_sec * refill_rate)
 

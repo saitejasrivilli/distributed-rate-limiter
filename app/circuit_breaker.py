@@ -17,11 +17,24 @@ import threading
 import time
 import collections
 from enum import Enum
+from prometheus_client import Counter, Gauge
 from app.logging_config import logger
 
-FAILURE_THRESHOLD = 5       # failures to open the breaker
-FAILURE_WINDOW = 10.0       # seconds over which failures are counted
-RECOVERY_TIMEOUT = 30.0     # seconds to wait before trying HALF_OPEN
+FAILURE_THRESHOLD = 5
+FAILURE_WINDOW = 10.0
+RECOVERY_TIMEOUT = 30.0
+_BUCKET_TTL = 86400.0  # evict fallback buckets idle for 24 h
+
+CB_TRANSITIONS = Counter(
+    "circuit_breaker_transitions_total",
+    "Circuit breaker state transitions",
+    ["transition"],
+)
+
+FALLBACK_BUCKETS_GAUGE = Gauge(
+    "rate_limit_fallback_buckets_current",
+    "Number of active in-memory fallback token buckets",
+)
 
 
 class State(str, Enum):
@@ -33,31 +46,29 @@ class State(str, Enum):
 class InMemoryTokenBucket:
     """
     Thread-safe per-client token bucket for in-memory fallback.
-    Uses a simple dict protected by a single lock.
-    Suitable for single-instance fallback; not distributed.
+    Buckets idle for > 24 h are evicted to bound memory growth.
     """
 
     def __init__(self):
         self._lock = threading.Lock()
-        # {client_key: {"tokens": float, "last_refill": float}}
+        # {key: {"tokens": float, "last_refill": float, "last_access": float}}
         self._buckets: dict[str, dict] = {}
 
     def check(self, key: str, capacity: int, refill_rate: float) -> tuple[bool, int]:
-        """
-        Returns (allowed, remaining).
-        capacity  — max tokens
-        refill_rate — tokens per second
-        """
         now = time.time()
         with self._lock:
+            self._evict_stale(now)
+
             bucket = self._buckets.get(key)
             if bucket is None:
-                bucket = {"tokens": float(capacity), "last_refill": now}
+                bucket = {"tokens": float(capacity), "last_refill": now, "last_access": now}
                 self._buckets[key] = bucket
+                FALLBACK_BUCKETS_GAUGE.set(len(self._buckets))
 
             elapsed = max(0.0, now - bucket["last_refill"])
             new_tokens = min(float(capacity), bucket["tokens"] + elapsed * refill_rate)
             bucket["last_refill"] = now
+            bucket["last_access"] = now
 
             if new_tokens >= 1.0:
                 new_tokens -= 1.0
@@ -70,10 +81,20 @@ class InMemoryTokenBucket:
     def reset(self, key: str) -> None:
         with self._lock:
             self._buckets.pop(key, None)
+            FALLBACK_BUCKETS_GAUGE.set(len(self._buckets))
 
     def clear(self) -> None:
         with self._lock:
             self._buckets.clear()
+            FALLBACK_BUCKETS_GAUGE.set(0)
+
+    def _evict_stale(self, now: float) -> None:
+        cutoff = now - _BUCKET_TTL
+        stale = [k for k, b in self._buckets.items() if b["last_access"] < cutoff]
+        for k in stale:
+            del self._buckets[k]
+        if stale:
+            FALLBACK_BUCKETS_GAUGE.set(len(self._buckets))
 
 
 class CircuitBreaker:
@@ -101,16 +122,10 @@ class CircuitBreaker:
 
         self._lock = threading.Lock()
         self._state = State.CLOSED
-        # deque of timestamps of recent failures
         self._failure_times: collections.deque[float] = collections.deque()
         self._opened_at: float = 0.0
 
-        # Shared in-memory fallback bucket store
         self.fallback = InMemoryTokenBucket()
-
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
 
     @property
     def state(self) -> State:
@@ -123,11 +138,11 @@ class CircuitBreaker:
                 logger.info("circuit_breaker: probe succeeded — closing")
                 self._state = State.CLOSED
                 self._failure_times.clear()
+                CB_TRANSITIONS.labels(transition="half_open_to_closed").inc()
 
     def record_failure(self) -> None:
         now = time.time()
         with self._lock:
-            # Prune old failures outside the window
             cutoff = now - self._failure_window
             while self._failure_times and self._failure_times[0] < cutoff:
                 self._failure_times.popleft()
@@ -138,6 +153,7 @@ class CircuitBreaker:
                 logger.warning("circuit_breaker: probe failed — reopening")
                 self._state = State.OPEN
                 self._opened_at = now
+                CB_TRANSITIONS.labels(transition="half_open_to_open").inc()
                 return
 
             if (
@@ -153,12 +169,9 @@ class CircuitBreaker:
                 )
                 self._state = State.OPEN
                 self._opened_at = now
+                CB_TRANSITIONS.labels(transition="closed_to_open").inc()
 
     def allow_request(self) -> bool:
-        """
-        Returns True if the call should be forwarded to Redis.
-        Handles OPEN → HALF_OPEN transition.
-        """
         now = time.time()
         with self._lock:
             if self._state == State.CLOSED:
@@ -168,17 +181,14 @@ class CircuitBreaker:
                 if now - self._opened_at >= self._recovery_timeout:
                     logger.info("circuit_breaker: recovery timeout elapsed — moving to HALF_OPEN")
                     self._state = State.HALF_OPEN
-                    return True  # allow the probe
-                return False  # still open
+                    CB_TRANSITIONS.labels(transition="open_to_half_open").inc()
+                    return True
+                return False
 
-            # HALF_OPEN — only one probe at a time; block subsequent callers
+            # HALF_OPEN — only one probe at a time
             return False
 
     async def call(self, coro_fn, *args, **kwargs):
-        """
-        Execute ``coro_fn(*args, **kwargs)``, recording success/failure.
-        Raises ``RedisCircuitOpen`` when the breaker is OPEN and not probing.
-        """
         if not self.allow_request():
             raise RedisCircuitOpen("Circuit breaker is OPEN — Redis is unavailable")
 

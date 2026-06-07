@@ -25,7 +25,7 @@ def event_loop_policy():
 
 @pytest_asyncio.fixture
 async def real_redis():
-    client = aioredis.Redis.from_url(REDIS_URL, decode_responses=True)
+    client = aioredis.Redis.from_url(REDIS_URL, decode_responses=True, protocol=2)
     await client.flushdb()
     yield client
     await client.flushdb()
