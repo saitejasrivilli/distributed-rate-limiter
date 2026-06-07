@@ -77,3 +77,16 @@ def validate_refill_rate(rate: float) -> float:
             detail=f"refill_rate must be between {MIN_REFILL_RATE} and {MAX_REFILL_RATE}"
         )
     return rate
+
+
+def validate_leak_rate(rate: float) -> float:
+    """
+    Leak rate for leaky bucket — items drained per second.
+    Reuses the same bounds as refill_rate.
+    """
+    if rate < MIN_REFILL_RATE or rate > MAX_REFILL_RATE:
+        raise HTTPException(
+            status_code=400,
+            detail=f"leak_rate must be between {MIN_REFILL_RATE} and {MAX_REFILL_RATE}"
+        )
+    return rate

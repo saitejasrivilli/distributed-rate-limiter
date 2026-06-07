@@ -9,6 +9,7 @@ from app.config import (
     REDIS_MAX_CONNECTIONS, REDIS_HEALTH_CHECK_INTERVAL,
 )
 from app.logging_config import logger
+from app.circuit_breaker import circuit_breaker, RedisCircuitOpen
 
 # ---------------------------------------------------------------------------
 # Lua scripts — all operations are atomic (single round-trip to Redis).
@@ -108,6 +109,53 @@ else
 end
 """
 
+# Leaky bucket: queue drains at a constant rate.
+# Stored as Redis Hash {queue_size, last_leak_time_ms}.
+# On each request: drain tokens accumulated since last call, then
+# add one item to the queue; reject if queue is full.
+LEAKY_BUCKET_SCRIPT = """
+local key         = KEYS[1]
+local capacity    = tonumber(ARGV[1])
+local leak_rate   = tonumber(ARGV[2])
+local now_ms      = tonumber(ARGV[3])
+
+local data        = redis.call('HMGET', key, 'queue_size', 'last_leak_ms')
+local queue_size  = tonumber(data[1])
+local last_leak   = tonumber(data[2])
+
+if queue_size == nil or last_leak == nil then
+    queue_size = 0
+    last_leak  = now_ms
+end
+
+-- Drain: calculate how many items leaked since last call
+local elapsed_sec = math.max(0, (now_ms - last_leak) / 1000.0)
+local leaked      = math.floor(elapsed_sec * leak_rate)
+queue_size        = math.max(0, queue_size - leaked)
+
+-- Only advance last_leak_ms by the time actually used to drain
+-- (avoids fractional leak credit accumulating).
+if leaked > 0 then
+    last_leak = last_leak + math.floor(leaked / leak_rate * 1000)
+end
+
+local ttl_sec = math.ceil(capacity / leak_rate) + 60
+
+if queue_size < capacity then
+    queue_size = queue_size + 1
+    redis.call('HMSET', key, 'queue_size', queue_size, 'last_leak_ms', last_leak)
+    redis.call('EXPIRE', key, ttl_sec)
+    local remaining = capacity - queue_size
+    return {1, remaining, 0}
+else
+    -- Queue full: compute wait until next slot opens
+    local wait_sec = math.max(1, math.ceil(1.0 / leak_rate))
+    redis.call('HMSET', key, 'queue_size', queue_size, 'last_leak_ms', last_leak)
+    redis.call('EXPIRE', key, ttl_sec)
+    return {0, 0, wait_sec}
+end
+"""
+
 # Self-protection: used internally to rate-limit the API itself.
 # Simple fixed-window used here for lowest overhead.
 SELF_PROTECT_SCRIPT = """
@@ -139,6 +187,7 @@ class RateLimiter:
         self._sliding_script = None
         self._fixed_script = None
         self._token_script = None
+        self._leaky_script = None
         self._self_protect_script = None
 
     async def connect(self):
@@ -162,6 +211,7 @@ class RateLimiter:
         self._sliding_script = self._redis.register_script(SLIDING_WINDOW_SCRIPT)
         self._fixed_script = self._redis.register_script(FIXED_WINDOW_SCRIPT)
         self._token_script = self._redis.register_script(TOKEN_BUCKET_SCRIPT)
+        self._leaky_script = self._redis.register_script(LEAKY_BUCKET_SCRIPT)
         self._self_protect_script = self._redis.register_script(SELF_PROTECT_SCRIPT)
 
         logger.info("Redis connection pool established")
@@ -176,6 +226,15 @@ class RateLimiter:
             return bool(await self._redis.ping())
         except Exception:
             return False
+
+    # ------------------------------------------------------------------
+    # Internal: run a registered script through the circuit breaker
+    # ------------------------------------------------------------------
+    async def _run_script(self, script, keys, args):
+        async def _exec():
+            return await script(keys=keys, args=args)
+
+        return await circuit_breaker.call(_exec)
 
     # ------------------------------------------------------------------
     # Self-protection — call before serving any rate-limit check
@@ -204,16 +263,29 @@ class RateLimiter:
         counter_key = f"rl:sw:seq:{client_id}"
         now_ms = int(time.time() * 1000)
         try:
-            result = await self._sliding_script(
+            result = await self._run_script(
+                self._sliding_script,
                 keys=[key, counter_key],
                 args=[now_ms, window_seconds * 1000, limit],
+            )
+        except RedisCircuitOpen:
+            logger.warning(
+                "sliding_window: circuit open — falling back to in-memory token bucket",
+                extra={"client_id": client_id},
+            )
+            allowed, remaining = circuit_breaker.fallback.check(
+                f"sw:{client_id}", limit, limit / window_seconds
+            )
+            return RateLimitResponse(
+                allowed=allowed, remaining=remaining, limit=limit,
+                retry_after=None if allowed else window_seconds,
+                algorithm="sliding_window", client_id=client_id,
             )
         except Exception as exc:
             logger.error(
                 "sliding_window redis error — failing open",
                 extra={"client_id": client_id, "exc_msg": str(exc)},
             )
-            # Fail open: allow the request, log the error
             return RateLimitResponse(
                 allowed=True, remaining=limit, limit=limit,
                 retry_after=None, algorithm="sliding_window", client_id=client_id,
@@ -234,9 +306,23 @@ class RateLimiter:
         key = f"rl:fw:{client_id}"
         now_ms = int(time.time() * 1000)
         try:
-            result = await self._fixed_script(
+            result = await self._run_script(
+                self._fixed_script,
                 keys=[key],
                 args=[limit, window_seconds, now_ms],
+            )
+        except RedisCircuitOpen:
+            logger.warning(
+                "fixed_window: circuit open — falling back to in-memory token bucket",
+                extra={"client_id": client_id},
+            )
+            allowed, remaining = circuit_breaker.fallback.check(
+                f"fw:{client_id}", limit, limit / window_seconds
+            )
+            return RateLimitResponse(
+                allowed=allowed, remaining=remaining, limit=limit,
+                retry_after=None if allowed else window_seconds,
+                algorithm="fixed_window", client_id=client_id,
             )
         except Exception as exc:
             logger.error(
@@ -263,9 +349,23 @@ class RateLimiter:
         key = f"rl:tb:{client_id}"
         now_ms = int(time.time() * 1000)
         try:
-            result = await self._token_script(
+            result = await self._run_script(
+                self._token_script,
                 keys=[key],
                 args=[capacity, refill_rate, now_ms],
+            )
+        except RedisCircuitOpen:
+            logger.warning(
+                "token_bucket: circuit open — falling back to in-memory token bucket",
+                extra={"client_id": client_id},
+            )
+            allowed, remaining = circuit_breaker.fallback.check(
+                f"tb:{client_id}", capacity, refill_rate
+            )
+            return RateLimitResponse(
+                allowed=allowed, remaining=remaining, limit=capacity,
+                retry_after=None if allowed else max(1, int(1.0 / refill_rate)),
+                algorithm="token_bucket", client_id=client_id,
             )
         except Exception as exc:
             logger.error(
@@ -286,6 +386,55 @@ class RateLimiter:
             client_id=client_id,
         )
 
+    async def leaky_bucket(
+        self, client_id: str, capacity: int, leak_rate: float
+    ) -> RateLimitResponse:
+        """
+        Leaky bucket algorithm.
+
+        capacity  — max queue depth (items)
+        leak_rate — items drained per second
+        """
+        key = f"rl:lb:{client_id}"
+        now_ms = int(time.time() * 1000)
+        try:
+            result = await self._run_script(
+                self._leaky_script,
+                keys=[key],
+                args=[capacity, leak_rate, now_ms],
+            )
+        except RedisCircuitOpen:
+            logger.warning(
+                "leaky_bucket: circuit open — falling back to in-memory token bucket",
+                extra={"client_id": client_id},
+            )
+            allowed, remaining = circuit_breaker.fallback.check(
+                f"lb:{client_id}", capacity, leak_rate
+            )
+            return RateLimitResponse(
+                allowed=allowed, remaining=remaining, limit=capacity,
+                retry_after=None if allowed else max(1, int(1.0 / leak_rate)),
+                algorithm="leaky_bucket", client_id=client_id,
+            )
+        except Exception as exc:
+            logger.error(
+                "leaky_bucket redis error — failing open",
+                extra={"client_id": client_id, "exc_msg": str(exc)},
+            )
+            return RateLimitResponse(
+                allowed=True, remaining=capacity, limit=capacity,
+                retry_after=None, algorithm="leaky_bucket", client_id=client_id,
+            )
+        allowed, remaining, retry_after = int(result[0]), int(result[1]), int(result[2])
+        return RateLimitResponse(
+            allowed=bool(allowed),
+            remaining=remaining,
+            limit=capacity,
+            retry_after=retry_after if not allowed else None,
+            algorithm="leaky_bucket",
+            client_id=client_id,
+        )
+
     async def reset(self, client_id: str) -> int:
         """
         Delete all state for a client_id.
@@ -295,11 +444,12 @@ class RateLimiter:
         """
         now_ms = int(time.time() * 1000)
 
-        # Explicit keys for sliding window and token bucket
+        # Explicit keys for sliding window, token bucket, and leaky bucket
         keys_to_delete = [
             f"rl:sw:{client_id}",
             f"rl:sw:seq:{client_id}",
             f"rl:tb:{client_id}",
+            f"rl:lb:{client_id}",
         ]
 
         # Fixed window: generate bucket keys for last 48 windows of each size

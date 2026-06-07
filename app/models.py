@@ -12,6 +12,7 @@ class AlgorithmType(str, Enum):
     sliding_window = "sliding_window"
     fixed_window = "fixed_window"
     token_bucket = "token_bucket"
+    leaky_bucket = "leaky_bucket"
 
 
 class RateLimitResponse(BaseModel):
@@ -95,6 +96,7 @@ class StatusResponse(BaseModel):
     redis_connected: bool
     algorithms_available: List[str]
     message: str
+    circuit_breaker_state: Optional[str] = None
 
 
 class ErrorResponse(BaseModel):
